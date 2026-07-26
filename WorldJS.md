@@ -10,6 +10,8 @@ It targets modern evergreen browsers with ES2022 class-field and private-method 
 | --- | --- |
 | `World.js` | Generation, chunks, rendering, destruction, saves, and multiplayer deltas |
 | `World-Collision.js` | Terrain collision, surface walking, ledges, falling, raycasts, and reports |
+| `Player.js` | Server authority, client prediction, controls, movement, and player rendering |
+| `Player-Plugin.js` | Base contract for modular player systems |
 | `tiles.json` | Pixel materials and resource materials |
 | `Biomes.json` | The five radial biomes and biome-specific content |
 | `generation.json` | Terrain shape, sea level, spawn, caves, and resource placement |
@@ -34,7 +36,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=terrain-collision-6";
+  import World from "./World.js?v=player-plugins-8";
 
   const canvas = document.querySelector("#world");
   const [tiles, biomes, generation] = await Promise.all([
@@ -714,6 +716,566 @@ Report types:
 
 Reports are local diagnostics and are not automatically included in multiplayer terrain packets.
 
+## Authoritative players
+
+`Player.js` uses `world.collision` for all movement. Create players through `World.js` so they are registered, rendered, and discoverable:
+
+```js
+const player = world.createPlayer({
+  id: "player-42",
+  role: "client",
+  speed: 5,
+  sprintMultiplier: 1.65,
+  radius: 0.38,
+  maxStep: 1,
+  maxDrop: 2,
+  canSwim: true,
+  spriteUrl: "./player.png"
+});
+```
+
+World player lifecycle:
+
+```js
+world.getPlayer("player-42");
+world.renderPlayers();
+world.removePlayer("player-42");
+```
+
+`world.render()` automatically renders registered players after terrain and before the mining cursor.
+
+### Player options
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `id` | generated | Network-stable player ID; set this explicitly for multiplayer |
+| `role` | `client` | `client` or `server` |
+| `x`, `y` | world spawn | Initial position |
+| `altitude` | live surface | Initial altitude |
+| `radius` | `0.38` | Collision footprint |
+| `speed` | `5` | Cells per second |
+| `sprintMultiplier` | `1.65` | Sprint speed multiplier |
+| `maxStep` | `1` | Highest automatically traversable rise |
+| `maxDrop` | `2` | Highest safe automatic drop |
+| `canSwim` | `true` | Whether surface movement may enter water |
+| `allowDrop` | `false` | Whether unsafe ledges may begin a fall |
+| `maxInputDelta` | `0.1` | Maximum accepted input duration |
+| `reconcileThreshold` | `0.03` | Position error that triggers correction |
+| `teleportThreshold` | `3` | Large-error metadata threshold |
+| `spriteUrl` | `./player.png` | Optional player sprite sheet |
+| `renderSize` | `16` | Player display size on the 16×16 grid |
+| `fallbackColor` | `#f3e56b` | Color used when the sprite is unavailable |
+| `onSendInput` | `null` | Client transport callback |
+| `onSendSnapshot` | `null` | Server transport callback |
+
+### Controls and client prediction
+
+Attach keyboard controls on the client:
+
+```js
+const localPlayer = world.createPlayer({
+  id: session.playerId,
+  role: "client",
+  onSendInput(input) {
+    socket.send(JSON.stringify({
+      type: "player-input",
+      input
+    }));
+  }
+});
+
+localPlayer.attachControls(window);
+
+let previous = performance.now();
+function frame(now) {
+  const dt = (now - previous) / 1000;
+  previous = now;
+
+  localPlayer.update(dt);
+  world.setCamera(localPlayer.x, localPlayer.y);
+  world.render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+```
+
+Controls:
+
+| Keys | Action |
+| --- | --- |
+| `W A S D` or arrows | Normalized eight-direction movement |
+| Left or right Shift | Sprint |
+
+Each client update:
+
+1. Samples controls.
+2. Creates a monotonically sequenced input.
+3. Applies it locally through terrain collision.
+4. Stores it as an unacknowledged input.
+5. Sends it through `onSendInput`.
+
+Input shape:
+
+```js
+{
+  playerId: "player-42",
+  sequence: 81,
+  moveX: 0.7071,
+  moveY: -0.7071,
+  sprint: false,
+  delta: 0.0167,
+  clientTime: 18420.5
+}
+```
+
+Movement vectors are normalized, values are clamped, and `delta` cannot exceed `maxInputDelta`.
+
+### Server authority
+
+Create one server-role player for each connected player:
+
+```js
+const serverPlayer = serverWorld.createPlayer({
+  id: connection.playerId,
+  role: "server",
+  onSendSnapshot(snapshot) {
+    connection.send(JSON.stringify({
+      type: "player-state",
+      snapshot
+    }));
+  }
+});
+
+function receiveClientMessage(message) {
+  if (message.type === "player-input") {
+    serverPlayer.enqueueInput(message.input);
+  }
+}
+
+function serverTick() {
+  serverPlayer.processServerInputs(32);
+}
+```
+
+The server:
+
+- rejects another player ID;
+- rejects invalid or already processed sequences;
+- clamps movement, sprint state, and elapsed time;
+- sorts queued inputs by sequence;
+- applies movement against the authoritative live terrain;
+- acknowledges the last processed input;
+- emits a state snapshot after each accepted input.
+
+Snapshot shape:
+
+```js
+{
+  protocol: 1,
+  type: "player-state",
+  worldId: "realm-01",
+  playerId: "player-42",
+  serverTick: 1493,
+  lastProcessedInput: 81,
+  x: 8201.42,
+  y: 8158.17,
+  altitude: 1,
+  direction: "north",
+  moving: true,
+  sprinting: false,
+  falling: false,
+  verticalVelocity: 0
+}
+```
+
+In production, the server should also enforce session ownership, input-rate limits, tool/status effects, speed modifiers, and maximum sequence gaps before calling `enqueueInput()`.
+
+### Reconciliation and replay
+
+Apply authoritative snapshots on the owning client:
+
+```js
+socket.addEventListener("message", ({ data }) => {
+  const message = JSON.parse(data);
+  if (message.type === "player-state") {
+    localPlayer.applySnapshot(message.snapshot);
+  }
+});
+```
+
+`applySnapshot()`:
+
+1. Verifies protocol, world ID, and player ID.
+2. Ignores stale acknowledgements.
+3. Removes acknowledged inputs.
+4. Measures prediction error.
+5. Resets to authoritative state when outside the threshold.
+6. Replays remaining unacknowledged inputs through the same collision code.
+
+Because server and client use the same seed, JSON schemas, terrain deltas, and `WorldCollision`, ordinary predictions converge without correction. A terrain revision should be delivered before any player snapshot that depends on it.
+
+### Remote players
+
+For non-owned players, do not call `update()` or attach controls. Apply received state to their position and render them:
+
+```js
+const remote = world.createPlayer({
+  id: remoteId,
+  role: "client",
+  spriteUrl: "./player.png"
+});
+
+remote.teleport(snapshot.x, snapshot.y, snapshot.altitude, {
+  report: false
+});
+remote.direction = snapshot.direction;
+remote.moving = snapshot.moving;
+```
+
+For production presentation, buffer remote snapshots and interpolate their display positions separately from authoritative collision state.
+
+### Player sprite sheet
+
+`player.png` uses 16×16 frames:
+
+```text
+sourceX = 16 * animationFrame
+sourceY = 16 * directionRow
+```
+
+Direction rows:
+
+| Row | Direction |
+| ---: | --- |
+| `0` | South |
+| `1` | West |
+| `2` | East |
+| `3` | North |
+
+Frames `0–3` form the walking cycle. A complete four-frame sheet is `64 × 64` pixels. If the image fails to load or a frame is missing, the player renders as a colored directional marker.
+
+```js
+await player.spriteReady;
+await player.loadSprite("./player.png");
+player.setSprite(existingImageElement);
+```
+
+### Player events
+
+```js
+player.on("*", (event) => {
+  console.log(event.type, event);
+});
+```
+
+| Event | Role | Meaning |
+| --- | --- | --- |
+| `prediction` | client | Local input was predicted |
+| `reconcile` | client | Authoritative snapshot was processed |
+| `authority` | server | Input was authoritatively simulated |
+| `move` | both | Collision movement completed |
+| `landing` | both | Falling simulation landed |
+| `teleport` | both | Player was repositioned |
+| `spriteload` | both | Player sprite loaded |
+| `spriteerror` | both | Player sprite failed |
+| `plugininstall` | both | A plugin and its dependencies were installed |
+| `pluginremove` | both | A plugin was removed |
+
+## Modular player plugins
+
+Inventory, equipment, combat, crafting, skills, status effects, quests, and other player systems can be added without modifying `Player.js`.
+
+Plugins extend `PlayerPlugin`:
+
+```js
+import Player from "./Player.js";
+import PlayerPlugin from "./Player-Plugin.js";
+```
+
+Register plugin classes once during application startup:
+
+```js
+Player.registerPlugin("inventory", InventoryPlugin);
+Player.registerPlugin("equipment", EquipmentPlugin);
+Player.registerPlugin("combat", CombatPlugin);
+```
+
+Install plugins by ID when creating a player:
+
+```js
+const player = world.createPlayer({
+  id: "player-42",
+  role: "client",
+  plugins: ["combat"]
+});
+```
+
+Dependencies install automatically. If Combat depends on Equipment and Equipment depends on Inventory, the resulting deterministic order is:
+
+```text
+inventory → equipment → combat
+```
+
+Circular dependencies throw an error. Removing a plugin required by another plugin is blocked unless `{ force: true }` is explicitly supplied.
+
+### Base plugin contract
+
+```js
+class ExamplePlugin extends PlayerPlugin {
+  static pluginId = "example";
+  static version = "1";
+  static priority = 100;
+  static dependencies = [];
+  static networked = true;
+
+  constructor(config = {}) {
+    super({
+      id: ExamplePlugin.pluginId,
+      version: ExamplePlugin.version,
+      priority: ExamplePlugin.priority,
+      dependencies: ExamplePlugin.dependencies,
+      networked: ExamplePlugin.networked,
+      state: {
+        enabled: true
+      }
+    });
+  }
+
+  install(player, config) {
+    super.install(player, config);
+  }
+
+  uninstall() {
+    super.uninstall();
+  }
+
+  serialize() {
+    return super.serialize();
+  }
+
+  deserialize(authoritativeState) {
+    super.deserialize(authoritativeState);
+  }
+}
+```
+
+Plugin IDs must start with a lowercase letter and contain only lowercase letters, numbers, `_`, or `-`.
+
+Plugin state and configuration are cloned as plain structured data. Keep networked state JSON-compatible and free of DOM nodes, functions, sockets, or class instances.
+
+### Inventory example
+
+```js
+class InventoryPlugin extends PlayerPlugin {
+  static pluginId = "inventory";
+  static version = "1";
+  static priority = 10;
+
+  constructor(config = {}) {
+    super({
+      id: "inventory",
+      version: "1",
+      priority: 10,
+      state: {
+        slots: Array(config.slots ?? 24).fill(null),
+        selected: 0,
+        revision: 0
+      }
+    });
+  }
+
+  addItem(item, amount = 1) {
+    // The server should validate item identity, capacity, and ownership.
+    this.state.slots[this.state.selected] = {
+      item,
+      amount
+    };
+    this.state.revision++;
+  }
+
+  augmentInput({ input }) {
+    input.plugins.inventory = {
+      selected: this.state.selected
+    };
+  }
+
+  validateInput({ input }) {
+    const selected = input.plugins?.inventory?.selected;
+    return Number.isInteger(selected) &&
+      selected >= 0 &&
+      selected < this.state.slots.length;
+  }
+}
+```
+
+Returning `false` from `validateInput()` rejects the input on the server.
+
+### Equipment example
+
+```js
+class EquipmentPlugin extends PlayerPlugin {
+  static pluginId = "equipment";
+  static version = "1";
+  static priority = 20;
+  static dependencies = ["inventory"];
+
+  constructor() {
+    super({
+      id: "equipment",
+      version: "1",
+      priority: 20,
+      dependencies: ["inventory"],
+      state: {
+        weapon: null,
+        armor: null,
+        carryWeight: 0
+      }
+    });
+  }
+
+  beforeMove(context) {
+    const penalty = Math.min(0.5, this.state.carryWeight / 200);
+    context.speed *= 1 - penalty;
+  }
+}
+```
+
+`beforeMove()` may adjust `speed`, `sprintMultiplier`, `moveX`, or `moveY`. Setting `context.cancelled = true`, or returning `false`, cancels movement.
+
+### Combat example
+
+```js
+class CombatPlugin extends PlayerPlugin {
+  static pluginId = "combat";
+  static version = "1";
+  static priority = 30;
+  static dependencies = ["equipment"];
+
+  constructor() {
+    super({
+      id: "combat",
+      version: "1",
+      priority: 30,
+      dependencies: ["equipment"],
+      state: {
+        health: 100,
+        stamina: 100,
+        cooldownUntil: 0
+      }
+    });
+  }
+
+  augmentInput({ input }) {
+    input.plugins.combat = {
+      attack: Boolean(this.attackPressed)
+    };
+  }
+
+  validateInput({ input }) {
+    const attack = input.plugins?.combat?.attack;
+    if (typeof attack !== "boolean") return false;
+
+    // A real authority should also validate cooldown, stamina,
+    // equipped weapon, range, line of sight, and target state.
+    return true;
+  }
+
+  update({ delta }) {
+    this.state.stamina = Math.min(
+      100,
+      this.state.stamina + delta * 8
+    );
+  }
+}
+```
+
+### Available hooks
+
+Hooks execute synchronously in ascending `priority`, then alphabetically by plugin ID.
+
+| Hook | Context | Purpose |
+| --- | --- | --- |
+| `installed` | `{ plugin }` | React after installation |
+| `removing` | `{ plugin }` | Cleanup before removal |
+| `update` | `{ delta, controls }` | Per-player tick |
+| `augmentInput` | `{ input, controls }` | Add plugin input data |
+| `validateInput` | `{ input }` | Server validation |
+| `beforeInput` | `{ input, predicted?, authoritative?, replayed? }` | Cancel or prepare input |
+| `afterInput` | `{ input, result }` | React after movement |
+| `beforeMove` | movement context | Apply movement modifiers |
+| `afterMove` | `{ input, movement, result }` | React to collision movement |
+| `beforeSnapshot` | `{ snapshot }` | Add authoritative snapshot data |
+| `afterSnapshot` | reconciliation context | React after client reconciliation |
+| `beforeRender` | rendering context | Draw below the player or cancel base rendering |
+| `afterRender` | rendering context | Draw equipment, effects, or UI above the player |
+
+Hooks must be synchronous so prediction and authority remain deterministic. Returning a Promise throws an error.
+
+### Plugin state synchronization
+
+Networked plugin state is included automatically in player snapshots:
+
+```js
+{
+  plugins: {
+    inventory: {
+      version: "1",
+      state: {
+        slots: [],
+        selected: 0,
+        revision: 12
+      }
+    },
+    equipment: {
+      version: "1",
+      state: {
+        weapon: "bronze_sword",
+        armor: "hide_tunic",
+        carryWeight: 34
+      }
+    }
+  }
+}
+```
+
+During reconciliation, the client:
+
+1. Requires every authoritative networked plugin to be installed.
+2. Verifies the exact plugin version.
+3. Deserializes authoritative state.
+4. Corrects player position when necessary.
+5. Replays unacknowledged inputs through the updated plugin state.
+
+Set `networked: false` for presentation-only plugins that should never enter authoritative snapshots.
+
+### Runtime management
+
+```js
+const inventory = player.usePlugin("inventory", {
+  slots: 24
+});
+
+player.getPlugin("inventory");
+player.getPluginManifest();
+
+player.removePlugin("inventory"); // blocked if dependents remain
+player.removePlugin("inventory", { force: true });
+```
+
+`player.destroy()` removes plugins in reverse order and calls every plugin’s `uninstall()` method.
+
+### Authority requirements
+
+Plugins extend the transport format, but do not make the client trustworthy. The server remains responsible for:
+
+- validating every plugin input payload;
+- owning inventory mutations and item creation;
+- verifying equipment ownership and compatibility;
+- computing damage, stamina, cooldowns, range, and line of sight;
+- issuing authoritative plugin state in snapshots;
+- rejecting missing, unknown, or incompatible plugin versions;
+- persisting plugin state separately from transient client prediction.
+
 ## Multiplayer model
 
 Use an authoritative server. Clients should send mining intents or locally predicted change packets; the server validates reach, radius, permissions, material, rate limits, and revision order before broadcasting an authoritative packet.
@@ -865,6 +1427,8 @@ Events:
 | `chunkload` | `{ cx, cy, altitude }` |
 | `reset` | `{ seed }` |
 | `collisionreport` | A collision, drop, or landing report from `world.collision` |
+| `playerjoin` | `{ player }` after `createPlayer()` |
+| `playerleave` | `{ player }` after `removePlayer()` |
 
 ## Save state
 

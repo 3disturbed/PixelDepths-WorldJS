@@ -1,4 +1,5 @@
 import WorldCollision from "./World-Collision.js";
+import Player from "./Player.js";
 
 /**
  * World.js
@@ -243,6 +244,7 @@ export default class World {
     this.tilemapUrl = options.tilemapUrl ?? this.generation.rendering.tilemapUrl;
     this.tilemapReady = Promise.resolve(null);
     this.collision = new WorldCollision(this, options.collision);
+    this.players = new Map();
 
     this.buffer = (canvas.ownerDocument ?? document).createElement("canvas");
     this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
@@ -997,6 +999,36 @@ export default class World {
     return this.collision.getReports(options);
   }
 
+  createPlayer(options = {}) {
+    const player = new Player(this, options);
+    if (this.players.has(player.id)) throw new Error(`Player "${player.id}" already exists.`);
+    this.players.set(player.id, player);
+    this.emit("playerjoin", { player });
+    return player;
+  }
+
+  getPlayer(id) {
+    return this.players.get(String(id)) ?? null;
+  }
+
+  removePlayer(id, options = {}) {
+    const key = String(id);
+    const player = this.players.get(key);
+    if (!player) return false;
+    this.players.delete(key);
+    if (options.destroy !== false) player.destroy();
+    this.emit("playerleave", { player });
+    return true;
+  }
+
+  renderPlayers(ctx = this.ctx, options = {}) {
+    let rendered = 0;
+    for (const player of this.players.values()) {
+      if (player.render(ctx, options)) rendered++;
+    }
+    return rendered;
+  }
+
   setTilemap(image) {
     const width = Number(image?.naturalWidth ?? image?.width ?? 0);
     const height = Number(image?.naturalHeight ?? image?.height ?? 0);
@@ -1102,6 +1134,8 @@ export default class World {
     this.ctx.imageSmoothingEnabled = false;
     this.ctx.drawImage(this.buffer, 0, 0, this.canvas.width, this.canvas.height);
     }
+
+    this.renderPlayers(this.ctx);
 
     if (this.pointer.active) {
       const sx = this.canvas.width / viewport.width;
