@@ -1,0 +1,521 @@
+/**
+ * World.js
+ * Chunked, deterministic, layered pixel terrain for browser games.
+ * Native ES6, HTML5 Canvas, no dependencies.
+ */
+export default class World {
+  static AIR = 0;
+  static WATER = 1;
+  static SAND = 2;
+  static GRASS = 3;
+  static SOIL = 4;
+  static STONE = 5;
+  static ORE = 6;
+  static CRYSTAL = 7;
+  static PROTOCOL = 1;
+
+  constructor(canvas, options = {}) {
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      throw new TypeError("World requires an HTMLCanvasElement.");
+    }
+
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d", { alpha: false });
+    if (!this.ctx) throw new Error("A 2D canvas context is required.");
+
+    this.width = this.#positiveInteger(options.width ?? 16384, "width");
+    this.height = this.#positiveInteger(options.height ?? 16384, "height");
+    this.chunkSize = this.#positiveInteger(options.chunkSize ?? 64, "chunkSize");
+    this.minAltitude = Math.trunc(options.minAltitude ?? -5);
+    this.maxAltitude = Math.trunc(options.maxAltitude ?? 5);
+    if (this.minAltitude > this.maxAltitude) throw new RangeError("minAltitude must not exceed maxAltitude.");
+
+    this.altitude = this.#clampAltitude(options.altitude ?? 0);
+    this.seed = Math.trunc(options.seed ?? 4182);
+    this.worldId = String(options.worldId ?? `world-${this.seed}`);
+    this.actorId = String(options.actorId ?? "client");
+    this.brushRadius = Number(options.brushRadius ?? 7);
+    this.zoom = Math.max(1, Number(options.zoom ?? 5));
+    this.camera = {
+      x: Number(options.cameraX ?? this.width / 2),
+      y: Number(options.cameraY ?? this.height / 2),
+    };
+    this.maxLoadedChunks = Math.max(8, Math.trunc(options.maxLoadedChunks ?? 512));
+    this.maxChangeLog = Math.max(0, Math.trunc(options.maxChangeLog ?? 10000));
+    this.autoRender = options.autoRender !== false;
+
+    this.chunks = new Map();
+    this.dirtyChunks = new Set();
+    this.changeLog = [];
+    this.outgoingChanges = [];
+    this.listeners = new Map();
+    this.seenOperations = new Set();
+    this.revision = 0;
+    this.remoteRevision = 0;
+    this.operationSequence = 0;
+    this.accessClock = 0;
+    this.pointer = { x: 0, y: 0, active: false };
+    this.stats = { removed: 0, lastMaterial: "—", loadedChunks: 0 };
+
+    this.palette = {
+      [World.AIR]: [9, 15, 21],
+      [World.WATER]: [26, 111, 145],
+      [World.SAND]: [216, 174, 91],
+      [World.GRASS]: [74, 126, 71],
+      [World.SOIL]: [112, 72, 48],
+      [World.STONE]: [91, 99, 101],
+      [World.ORE]: [190, 112, 47],
+      [World.CRYSTAL]: [86, 207, 190],
+    };
+    this.materialNames = ["air", "water", "sand", "grass", "soil", "stone", "ore", "crystal"];
+
+    this.buffer = document.createElement("canvas");
+    this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
+    this.resize();
+  }
+
+  #positiveInteger(value, name) {
+    const number = Math.trunc(Number(value));
+    if (!Number.isSafeInteger(number) || number <= 0) throw new RangeError(`${name} must be a positive safe integer.`);
+    return number;
+  }
+
+  #clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  #clampAltitude(value) {
+    return this.#clamp(Math.round(Number(value)), this.minAltitude, this.maxAltitude);
+  }
+
+  #inBounds(x, y) {
+    return x >= 0 && y >= 0 && x < this.width && y < this.height;
+  }
+
+  #chunkKey(cx, cy, altitude) {
+    return `${altitude}:${cx}:${cy}`;
+  }
+
+  #cellLocation(x, y, altitude) {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const cx = Math.floor(ix / this.chunkSize);
+    const cy = Math.floor(iy / this.chunkSize);
+    const lx = ix - cx * this.chunkSize;
+    const ly = iy - cy * this.chunkSize;
+    return { ix, iy, cx, cy, lx, ly, altitude, index: ly * this.chunkSize + lx };
+  }
+
+  // Stable coordinate noise means every client can regenerate pristine chunks.
+  hash(x, y, salt = 0) {
+    let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263) +
+      Math.imul(this.seed, 69069) + Math.imul(salt, 1447)) | 0;
+    n = Math.imul(n ^ (n >> 13), 1274126177);
+    return ((n ^ (n >> 16)) >>> 0) / 4294967295;
+  }
+
+  noise(x, y, scale = 18, salt = 0) {
+    const gx = Math.floor(x / scale);
+    const gy = Math.floor(y / scale);
+    const tx = x / scale - gx;
+    const ty = y / scale - gy;
+    const smooth = (t) => t * t * (3 - 2 * t);
+    const a = this.hash(gx, gy, salt);
+    const b = this.hash(gx + 1, gy, salt);
+    const c = this.hash(gx, gy + 1, salt);
+    const d = this.hash(gx + 1, gy + 1, salt);
+    const ab = a + (b - a) * smooth(tx);
+    const cd = c + (d - c) * smooth(tx);
+    return ab + (cd - ab) * smooth(ty);
+  }
+
+  generatedMaterialAt(x, y, altitude) {
+    const continental = this.noise(x, y, 46, 1) * 0.68 + this.noise(x, y, 19, 2) * 0.32;
+    const ridge = 1 - Math.abs(this.noise(x, y, 25, 8) * 2 - 1);
+    const top = this.#clamp(
+      Math.round((continental - 0.46) * 11 + Math.max(0, ridge - 0.62) * 11),
+      this.minAltitude,
+      this.maxAltitude,
+    );
+
+    if (altitude > top) return altitude <= 0 ? World.WATER : World.AIR;
+    const depth = top - altitude;
+    let material = depth === 0
+      ? (top <= 0 ? World.SAND : World.GRASS)
+      : depth < 2 ? World.SOIL : World.STONE;
+
+    const vein = this.noise(x + altitude * 9, y - altitude * 5, 10, 20 + altitude);
+    if (depth > 1 && vein > 0.82) material = altitude < -2 ? World.CRYSTAL : World.ORE;
+
+    const cave = this.noise(x + altitude * 13, y, 13, 40) * 0.62 +
+      this.noise(x, y - altitude * 11, 7, 41) * 0.38;
+    if (depth > 1 && cave > 0.745) material = altitude < 0 ? World.WATER : World.AIR;
+    return material;
+  }
+
+  getChunk(cx, cy, altitude = this.altitude, create = true) {
+    altitude = this.#clampAltitude(altitude);
+    const key = this.#chunkKey(cx, cy, altitude);
+    let chunk = this.chunks.get(key);
+    if (chunk || !create) {
+      if (chunk) chunk.lastAccess = ++this.accessClock;
+      return chunk ?? null;
+    }
+
+    const cells = new Uint8Array(this.chunkSize * this.chunkSize);
+    const startX = cx * this.chunkSize;
+    const startY = cy * this.chunkSize;
+    for (let ly = 0; ly < this.chunkSize; ly++) {
+      for (let lx = 0; lx < this.chunkSize; lx++) {
+        const x = startX + lx;
+        const y = startY + ly;
+        cells[ly * this.chunkSize + lx] = this.#inBounds(x, y)
+          ? this.generatedMaterialAt(x, y, altitude)
+          : World.AIR;
+      }
+    }
+
+    chunk = { cx, cy, altitude, cells, lastAccess: ++this.accessClock };
+    this.chunks.set(key, chunk);
+    this.stats.loadedChunks = this.chunks.size;
+    this.evictChunks();
+    this.emit("chunkload", { cx, cy, altitude });
+    return chunk;
+  }
+
+  materialAt(x, y, altitude = this.altitude) {
+    if (!this.#inBounds(x, y)) return World.AIR;
+    const location = this.#cellLocation(x, y, this.#clampAltitude(altitude));
+    return this.getChunk(location.cx, location.cy, location.altitude).cells[location.index];
+  }
+
+  setMaterial(x, y, altitude, material, options = {}) {
+    if (!this.#inBounds(x, y)) return false;
+    const z = this.#clampAltitude(altitude);
+    const value = Math.trunc(Number(material));
+    if (!(value in this.palette)) throw new RangeError(`Unknown material id: ${material}`);
+    const location = this.#cellLocation(x, y, z);
+    const chunk = this.getChunk(location.cx, location.cy, z);
+    if (chunk.cells[location.index] === value) return false;
+
+    chunk.cells[location.index] = value;
+    this.dirtyChunks.add(this.#chunkKey(location.cx, location.cy, z));
+    if (options.record !== false) {
+      const change = { x: location.ix, y: location.iy, z, material: value };
+      (options.collector ?? this.outgoingChanges).push(change);
+    }
+    return true;
+  }
+
+  mine(worldX, worldY, radius = this.brushRadius, altitude = this.altitude, options = {}) {
+    const z = this.#clampAltitude(altitude);
+    const r = this.#clamp(Number(radius), 1, 256);
+    const r2 = r * r;
+    const changes = [];
+    let removed = 0;
+    let last = World.AIR;
+    const x0 = Math.max(0, Math.floor(worldX - r));
+    const x1 = Math.min(this.width - 1, Math.ceil(worldX + r));
+    const y0 = Math.max(0, Math.floor(worldY - r));
+    const y1 = Math.min(this.height - 1, Math.ceil(worldY + r));
+
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - worldX;
+        const dy = y - worldY;
+        if (dx * dx + dy * dy > r2 + this.hash(x, y, z + 91) * r * 0.42) continue;
+        const material = this.materialAt(x, y, z);
+        if (material === World.AIR || material === World.WATER) continue;
+        last = material;
+        const replacement = z < 0 && this.touchesWater(x, y, z) ? World.WATER : World.AIR;
+        if (this.setMaterial(x, y, z, replacement, { collector: changes })) removed++;
+      }
+    }
+
+    if (changes.length) this.#commitLocalChanges(changes, options.operationId);
+    this.stats.removed += removed;
+    this.stats.lastMaterial = this.materialNames[last];
+    if (this.autoRender && options.render !== false) this.render();
+    return removed;
+  }
+
+  touchesWater(x, y, altitude = this.altitude) {
+    return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+      const nx = x + dx;
+      const ny = y + dy;
+      return !this.#inBounds(nx, ny) || this.materialAt(nx, ny, altitude) === World.WATER;
+    });
+  }
+
+  #commitLocalChanges(changes, operationId) {
+    this.revision++;
+    const opId = String(operationId ?? `${this.actorId}:${++this.operationSequence}`);
+    const stamped = changes.map((change) => ({ ...change, revision: this.revision, operationId: opId }));
+    this.outgoingChanges.push(...stamped);
+    this.changeLog.push(...stamped);
+    if (this.changeLog.length > this.maxChangeLog) {
+      this.changeLog.splice(0, this.changeLog.length - this.maxChangeLog);
+    }
+    this.emit("change", { source: "local", revision: this.revision, operationId: opId, changes: stamped });
+  }
+
+  /**
+   * Returns and clears locally authored changes as one JSON-safe packet.
+   * Send this packet to an authoritative server; do not trust client packets blindly.
+   */
+  drainChanges() {
+    const changes = this.outgoingChanges.splice(0);
+    return {
+      protocol: World.PROTOCOL,
+      worldId: this.worldId,
+      seed: this.seed,
+      actorId: this.actorId,
+      revision: this.revision,
+      changes,
+    };
+  }
+
+  /**
+   * Applies an ordered packet from an authoritative server.
+   * Duplicate operation ids are ignored. Set strictRevision=false for snapshots/recovery.
+   */
+  applyChanges(packet, options = {}) {
+    if (!packet || packet.protocol !== World.PROTOCOL) throw new Error("Unsupported world change protocol.");
+    if (packet.worldId !== this.worldId || packet.seed !== this.seed) throw new Error("Change packet belongs to another world.");
+    const strict = options.strictRevision !== false;
+    const incomingRevision = Math.trunc(packet.revision ?? 0);
+    if (strict && incomingRevision < this.remoteRevision) return 0;
+    if (strict && packet.baseRevision != null && packet.baseRevision !== this.remoteRevision) {
+      throw new Error(`Revision gap: expected base ${this.remoteRevision}, received ${packet.baseRevision}.`);
+    }
+
+    let applied = 0;
+    const accepted = [];
+    for (const change of packet.changes ?? []) {
+      const operationId = change.operationId == null ? null : String(change.operationId);
+      if (operationId && this.seenOperations.has(operationId)) continue;
+      if (this.setMaterial(change.x, change.y, change.z, change.material, { record: false })) {
+        applied++;
+        accepted.push(change);
+      }
+      if (operationId) this.seenOperations.add(operationId);
+    }
+
+    this.remoteRevision = Math.max(this.remoteRevision, incomingRevision);
+    this.#trimSeenOperations();
+    if (accepted.length) this.emit("change", { source: "remote", revision: incomingRevision, changes: accepted });
+    if (this.autoRender && options.render !== false && accepted.length) this.render();
+    return applied;
+  }
+
+  #trimSeenOperations() {
+    if (this.seenOperations.size <= 20000) return;
+    const keep = [...this.seenOperations].slice(-10000);
+    this.seenOperations = new Set(keep);
+  }
+
+  changesSince(revision) {
+    return this.changeLog.filter((change) => change.revision > revision);
+  }
+
+  exportChunk(cx, cy, altitude = this.altitude) {
+    const chunk = this.getChunk(cx, cy, altitude);
+    return {
+      protocol: World.PROTOCOL,
+      worldId: this.worldId,
+      seed: this.seed,
+      cx,
+      cy,
+      z: chunk.altitude,
+      revision: Math.max(this.revision, this.remoteRevision),
+      cells: Array.from(chunk.cells),
+    };
+  }
+
+  importChunk(snapshot, options = {}) {
+    if (snapshot.worldId !== this.worldId || snapshot.seed !== this.seed) throw new Error("Chunk belongs to another world.");
+    if (!Array.isArray(snapshot.cells) || snapshot.cells.length !== this.chunkSize ** 2) {
+      throw new Error("Invalid chunk cell data.");
+    }
+    const z = this.#clampAltitude(snapshot.z);
+    const key = this.#chunkKey(snapshot.cx, snapshot.cy, z);
+    this.chunks.set(key, {
+      cx: snapshot.cx,
+      cy: snapshot.cy,
+      altitude: z,
+      cells: Uint8Array.from(snapshot.cells),
+      lastAccess: ++this.accessClock,
+    });
+    if (options.dirty !== false) this.dirtyChunks.add(key);
+    this.remoteRevision = Math.max(this.remoteRevision, Math.trunc(snapshot.revision ?? 0));
+    this.stats.loadedChunks = this.chunks.size;
+    if (this.autoRender && options.render !== false) this.render();
+  }
+
+  evictChunks(limit = this.maxLoadedChunks) {
+    if (this.chunks.size <= limit) return 0;
+    const candidates = [...this.chunks.entries()]
+      .filter(([key]) => !this.dirtyChunks.has(key))
+      .sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    let removed = 0;
+    while (this.chunks.size > limit && candidates.length) {
+      const [key] = candidates.shift();
+      this.chunks.delete(key);
+      removed++;
+    }
+    this.stats.loadedChunks = this.chunks.size;
+    return removed;
+  }
+
+  markChunkPersisted(cx, cy, altitude) {
+    this.dirtyChunks.delete(this.#chunkKey(cx, cy, this.#clampAltitude(altitude)));
+    this.evictChunks();
+  }
+
+  generate(seed = this.seed) {
+    this.seed = Math.trunc(seed);
+    this.chunks.clear();
+    this.dirtyChunks.clear();
+    this.changeLog.length = 0;
+    this.outgoingChanges.length = 0;
+    this.seenOperations.clear();
+    this.revision = 0;
+    this.remoteRevision = 0;
+    this.stats = { removed: 0, lastMaterial: "—", loadedChunks: 0 };
+    this.emit("reset", { seed: this.seed });
+    if (this.autoRender) this.render();
+  }
+
+  setAltitude(altitude) {
+    this.altitude = this.#clampAltitude(altitude);
+    if (this.autoRender) this.render();
+  }
+
+  setBrushRadius(radius) {
+    this.brushRadius = this.#clamp(Number(radius), 1, 256);
+    if (this.autoRender) this.render();
+  }
+
+  setCamera(x, y, zoom = this.zoom) {
+    this.zoom = this.#clamp(Number(zoom), 1, 64);
+    this.camera.x = this.#clamp(Number(x), 0, this.width - 1);
+    this.camera.y = this.#clamp(Number(y), 0, this.height - 1);
+    if (this.autoRender) this.render();
+  }
+
+  pan(dx, dy) {
+    this.setCamera(this.camera.x + Number(dx), this.camera.y + Number(dy));
+  }
+
+  getViewport() {
+    const rect = this.canvas.getBoundingClientRect();
+    const cellsWide = Math.max(1, Math.ceil(rect.width / this.zoom));
+    const cellsHigh = Math.max(1, Math.ceil(rect.height / this.zoom));
+    const x = this.#clamp(Math.floor(this.camera.x - cellsWide / 2), 0, Math.max(0, this.width - cellsWide));
+    const y = this.#clamp(Math.floor(this.camera.y - cellsHigh / 2), 0, Math.max(0, this.height - cellsHigh));
+    return { x, y, width: Math.min(cellsWide, this.width), height: Math.min(cellsHigh, this.height) };
+  }
+
+  eventToWorld(event) {
+    const rect = this.canvas.getBoundingClientRect();
+    const viewport = this.getViewport();
+    return {
+      x: viewport.x + (event.clientX - rect.left) / rect.width * viewport.width,
+      y: viewport.y + (event.clientY - rect.top) / rect.height * viewport.height,
+    };
+  }
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const ratio = Math.min(globalThis.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+    this.canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+    this.ctx.imageSmoothingEnabled = false;
+    if (this.autoRender) this.render();
+  }
+
+  render() {
+    const viewport = this.getViewport();
+    if (this.buffer.width !== viewport.width || this.buffer.height !== viewport.height) {
+      this.buffer.width = viewport.width;
+      this.buffer.height = viewport.height;
+    }
+    const image = this.bufferCtx.createImageData(viewport.width, viewport.height);
+    const data = image.data;
+
+    for (let sy = 0; sy < viewport.height; sy++) {
+      for (let sx = 0; sx < viewport.width; sx++) {
+        const x = viewport.x + sx;
+        const y = viewport.y + sy;
+        const material = this.materialAt(x, y, this.altitude);
+        let color = this.palette[material];
+        if (material === World.AIR && this.altitude > this.minAltitude) {
+          const below = this.palette[this.materialAt(x, y, this.altitude - 1)];
+          color = [below[0] * 0.46, below[1] * 0.46, below[2] * 0.46];
+        }
+        const grain = material > World.WATER ? (this.hash(x, y, this.altitude) * 17 | 0) - 8 : 0;
+        const i = (sy * viewport.width + sx) * 4;
+        data[i] = this.#clamp(color[0] + grain, 0, 255);
+        data[i + 1] = this.#clamp(color[1] + grain, 0, 255);
+        data[i + 2] = this.#clamp(color[2] + grain, 0, 255);
+        data[i + 3] = 255;
+      }
+    }
+
+    this.bufferCtx.putImageData(image, 0, 0);
+    this.ctx.imageSmoothingEnabled = false;
+    this.ctx.drawImage(this.buffer, 0, 0, this.canvas.width, this.canvas.height);
+
+    if (this.pointer.active) {
+      const sx = this.canvas.width / viewport.width;
+      const sy = this.canvas.height / viewport.height;
+      this.ctx.save();
+      this.ctx.strokeStyle = "#f4e9c9";
+      this.ctx.lineWidth = Math.max(2, Math.min(sx, sy) * 0.65);
+      this.ctx.setLineDash([4 * sx, 3 * sx]);
+      this.ctx.beginPath();
+      this.ctx.arc(
+        (this.pointer.x - viewport.x) * sx,
+        (this.pointer.y - viewport.y) * sy,
+        this.brushRadius * (sx + sy) / 2,
+        0,
+        Math.PI * 2,
+      );
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+  }
+
+  on(type, listener) {
+    if (typeof listener !== "function") throw new TypeError("listener must be a function.");
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(listener);
+    return () => this.off(type, listener);
+  }
+
+  off(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  emit(type, detail) {
+    for (const listener of this.listeners.get(type) ?? []) listener(detail, this);
+  }
+
+  serialize() {
+    return {
+      protocol: World.PROTOCOL,
+      worldId: this.worldId,
+      seed: this.seed,
+      width: this.width,
+      height: this.height,
+      chunkSize: this.chunkSize,
+      minAltitude: this.minAltitude,
+      maxAltitude: this.maxAltitude,
+      revision: Math.max(this.revision, this.remoteRevision),
+      chunks: [...this.dirtyChunks].map((key) => {
+        const chunk = this.chunks.get(key);
+        return chunk ? this.exportChunk(chunk.cx, chunk.cy, chunk.altitude) : null;
+      }).filter(Boolean),
+    };
+  }
+}
