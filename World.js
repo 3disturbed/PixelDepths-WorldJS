@@ -4,6 +4,16 @@
  * Native ES6, HTML5 Canvas, no dependencies.
  */
 export default class World {
+  static BIOMES = {
+    meadows: { id: 0, name: "Spawn Meadows", start: 0, end: 0.16, heightBias: 0.08, ridgeStrength: 0.25, caveThreshold: 0.79, oreThreshold: 0.9, surface: "grass", shallow: "soil", tint: [1.08, 1.08, 0.94], danger: 0 },
+    greenwood: { id: 1, name: "Greenwood", start: 0.11, end: 0.34, heightBias: 0.04, ridgeStrength: 0.45, caveThreshold: 0.77, oreThreshold: 0.87, surface: "grass", shallow: "soil", tint: [0.82, 1.02, 0.82], danger: 1 },
+    mire: { id: 2, name: "Sunken Mire", start: 0.28, end: 0.49, heightBias: -0.13, ridgeStrength: 0.2, caveThreshold: 0.735, oreThreshold: 0.84, surface: "sand", shallow: "soil", tint: [0.78, 0.88, 0.72], danger: 2 },
+    highlands: { id: 3, name: "Stone Highlands", start: 0.43, end: 0.67, heightBias: 0.15, ridgeStrength: 1.15, caveThreshold: 0.75, oreThreshold: 0.8, surface: "stone", shallow: "stone", tint: [1.03, 1.02, 0.95], danger: 3 },
+    deepwild: { id: 4, name: "Deepwild", start: 0.61, end: 0.81, heightBias: 0.03, ridgeStrength: 0.72, caveThreshold: 0.72, oreThreshold: 0.78, surface: "grass", shallow: "stone", tint: [0.72, 0.92, 0.8], danger: 4 },
+    frostlands: { id: 5, name: "Frostlands", start: 0.76, end: 0.94, heightBias: 0.17, ridgeStrength: 1.3, caveThreshold: 0.755, oreThreshold: 0.75, surface: "stone", shallow: "stone", tint: [0.82, 1.08, 1.18], danger: 5 },
+    ember_reach: { id: 6, name: "Ember Reach", start: 0.9, end: 1.2, heightBias: 0.09, ridgeStrength: 1.05, caveThreshold: 0.7, oreThreshold: 0.7, surface: "stone", shallow: "stone", tint: [1.25, 0.76, 0.62], danger: 6 },
+  };
+
   static TILES = {
     air: {
       id: 0,
@@ -104,6 +114,21 @@ export default class World {
     return tiles;
   }
 
+  static async loadBiomes(url = "./Biomes.json", options = {}) {
+    const response = await fetch(url, {
+      cache: options.cache ?? "no-cache",
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Unable to load biomes from "${url}" (${response.status} ${response.statusText}).`);
+    }
+    const biomes = await response.json();
+    if (!biomes || typeof biomes !== "object" || Array.isArray(biomes)) {
+      throw new TypeError(`Biome file "${url}" must contain a JSON object.`);
+    }
+    return biomes;
+  }
+
   constructor(canvas, options = {}) {
     if (!canvas || typeof canvas.getContext !== "function" ||
         typeof canvas.getBoundingClientRect !== "function") {
@@ -150,6 +175,20 @@ export default class World {
 
     this.tiles = this.#prepareTiles(options.tiles ?? World.TILES);
     this.tileSetId = String(options.tileSetId ?? "worldjs-default-v1");
+    this.biomeSetId = String(options.biomeSetId ?? "worldjs-center-out-v1");
+    this.biomes = this.#prepareBiomes(options.biomes ?? World.BIOMES);
+    this.biomeOrder = Object.entries(this.biomes).sort((a, b) => a[1].start - b[1].start);
+    this.biomeCenter = {
+      x: Number(options.biomeCenterX ?? this.width / 2),
+      y: Number(options.biomeCenterY ?? this.height / 2),
+    };
+    this.spawnRadius = Math.max(8, Number(options.spawnRadius ?? Math.min(this.width, this.height) * 0.035));
+    this.biomeWarpStrength = Math.max(0, Number(options.biomeWarpStrength ?? 0.065));
+    this.biomeWarpScale = Math.max(16, Number(options.biomeWarpScale ?? Math.min(this.width, this.height) / 11));
+    this.biomeMaxRadius = Math.hypot(
+      Math.max(this.biomeCenter.x, this.width - this.biomeCenter.x),
+      Math.max(this.biomeCenter.y, this.height - this.biomeCenter.y),
+    );
     this.tileById = new Map(Object.entries(this.tiles).map(([key, tile]) => [tile.id, { key, ...tile }]));
     this.palette = Object.fromEntries([...this.tileById].map(([id, tile]) => [id, tile.color]));
     this.materialNames = [];
@@ -197,6 +236,42 @@ export default class World {
       }
     }
     return tiles;
+  }
+
+  #prepareBiomes(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new TypeError("biomes must be a JSON object keyed by biome name.");
+    }
+    const biomes = JSON.parse(JSON.stringify(source));
+    const ids = new Set();
+    for (const [key, biome] of Object.entries(biomes)) {
+      if (!biome || typeof biome !== "object" || Array.isArray(biome)) {
+        throw new TypeError(`Biome "${key}" must be an object.`);
+      }
+      if (!Number.isInteger(biome.id) || biome.id < 0 || ids.has(biome.id)) {
+        throw new RangeError(`Biome "${key}" requires a unique non-negative integer id.`);
+      }
+      if (!Number.isFinite(biome.start) || !Number.isFinite(biome.end) ||
+          biome.start < 0 || biome.end <= biome.start) {
+        throw new RangeError(`Biome "${key}" requires a valid start/end radius.`);
+      }
+      if (!this.tiles[biome.surface] || !this.tiles[biome.shallow]) {
+        throw new Error(`Biome "${key}" references an unknown surface or shallow tile.`);
+      }
+      if (!Array.isArray(biome.tint) || biome.tint.length !== 3 ||
+          biome.tint.some((channel) => !Number.isFinite(channel) || channel < 0)) {
+        throw new RangeError(`Biome "${key}" requires a three-channel tint.`);
+      }
+      biome.name = String(biome.name ?? key);
+      biome.heightBias = Number(biome.heightBias ?? 0);
+      biome.ridgeStrength = Math.max(0, Number(biome.ridgeStrength ?? 1));
+      biome.caveThreshold = Number(biome.caveThreshold ?? 0.745);
+      biome.oreThreshold = Number(biome.oreThreshold ?? 0.82);
+      biome.danger = Math.max(0, Number(biome.danger ?? 0));
+      ids.add(biome.id);
+    }
+    if (!Object.keys(biomes).length) throw new Error("At least one biome is required.");
+    return biomes;
   }
 
   #clamp(value, min, max) {
@@ -248,27 +323,80 @@ export default class World {
     return ab + (cd - ab) * smooth(ty);
   }
 
+  radialBiomeDistanceAt(x, y) {
+    return Math.hypot(x - this.biomeCenter.x, y - this.biomeCenter.y) / this.biomeMaxRadius;
+  }
+
+  warpedBiomeDistanceAt(x, y) {
+    const radial = this.radialBiomeDistanceAt(x, y);
+    const edgeProtection = Math.min(1, radial / 0.08);
+    const broad = this.noise(x, y, this.biomeWarpScale, 501) * 2 - 1;
+    const detail = this.noise(x, y, this.biomeWarpScale * 0.38, 502) * 2 - 1;
+    return Math.max(
+      0,
+      radial + (broad * 0.72 + detail * 0.28) * this.biomeWarpStrength * edgeProtection,
+    );
+  }
+
+  getBiomeAt(x, y) {
+    const spawnDistance = Math.hypot(x - this.biomeCenter.x, y - this.biomeCenter.y);
+    const radialDistance = this.radialBiomeDistanceAt(x, y);
+    const distance = spawnDistance <= this.spawnRadius ? 0 : this.warpedBiomeDistanceAt(x, y);
+    let selected = this.biomeOrder[0];
+    let bestScore = -Infinity;
+
+    for (const entry of this.biomeOrder) {
+      const biome = entry[1];
+      const center = (biome.start + biome.end) / 2;
+      const halfWidth = (biome.end - biome.start) / 2;
+      const score = 1 - Math.abs(distance - center) / halfWidth;
+      if (score > bestScore) {
+        selected = entry;
+        bestScore = score;
+      }
+    }
+
+    return {
+      ...selected[1],
+      key: selected[0],
+      radialDistance,
+      warpedDistance: distance,
+      isSpawn: spawnDistance <= this.spawnRadius,
+    };
+  }
+
+  getSpawn() {
+    return { x: this.biomeCenter.x, y: this.biomeCenter.y, radius: this.spawnRadius };
+  }
+
   generatedMaterialAt(x, y, altitude) {
+    const biome = this.getBiomeAt(x, y);
     const continental = this.noise(x, y, 46, 1) * 0.68 + this.noise(x, y, 19, 2) * 0.32;
     const ridge = 1 - Math.abs(this.noise(x, y, 25, 8) * 2 - 1);
-    const top = this.#clamp(
-      Math.round((continental - 0.46) * 11 + Math.max(0, ridge - 0.62) * 11),
+    let top = this.#clamp(
+      Math.round(
+        (continental - 0.46 + biome.heightBias) * 11 +
+        Math.max(0, ridge - 0.62) * 11 * biome.ridgeStrength
+      ),
       this.minAltitude,
       this.maxAltitude,
     );
+    if (biome.isSpawn) top = Math.max(1, top);
 
     if (altitude > top) return altitude <= 0 ? World.WATER : World.AIR;
     const depth = top - altitude;
     let material = depth === 0
-      ? (top <= 0 ? World.SAND : World.GRASS)
-      : depth < 2 ? World.SOIL : World.STONE;
+      ? (top <= 0 ? World.SAND : this.tiles[biome.surface].id)
+      : depth < 2 ? this.tiles[biome.shallow].id : World.STONE;
 
     const vein = this.noise(x + altitude * 9, y - altitude * 5, 10, 20 + altitude);
-    if (depth > 1 && vein > 0.82) material = altitude < -2 ? World.CRYSTAL : World.ORE;
+    if (depth > 1 && vein > biome.oreThreshold) material = altitude < -2 ? World.CRYSTAL : World.ORE;
 
     const cave = this.noise(x + altitude * 13, y, 13, 40) * 0.62 +
       this.noise(x, y - altitude * 11, 7, 41) * 0.38;
-    if (depth > 1 && cave > 0.745) material = altitude < 0 ? World.WATER : World.AIR;
+    if (!biome.isSpawn && depth > 1 && cave > biome.caveThreshold) {
+      material = altitude < 0 ? World.WATER : World.AIR;
+    }
     return material;
   }
 
@@ -394,6 +522,7 @@ export default class World {
       worldId: this.worldId,
       seed: this.seed,
       tileSetId: this.tileSetId,
+      biomeSetId: this.biomeSetId,
       actorId: this.actorId,
       revision: this.revision,
       changes,
@@ -407,8 +536,8 @@ export default class World {
   applyChanges(packet, options = {}) {
     if (!packet || packet.protocol !== World.PROTOCOL) throw new Error("Unsupported world change protocol.");
     if (packet.worldId !== this.worldId || packet.seed !== this.seed ||
-        packet.tileSetId !== this.tileSetId) {
-      throw new Error("Change packet belongs to another world or tile set.");
+        packet.tileSetId !== this.tileSetId || packet.biomeSetId !== this.biomeSetId) {
+      throw new Error("Change packet belongs to another world, tile set, or biome set.");
     }
     const strict = options.strictRevision !== false;
     const incomingRevision = Math.trunc(packet.revision ?? 0);
@@ -455,6 +584,7 @@ export default class World {
       worldId: this.worldId,
       seed: this.seed,
       tileSetId: this.tileSetId,
+      biomeSetId: this.biomeSetId,
       cx,
       cy,
       z: chunk.altitude,
@@ -465,8 +595,8 @@ export default class World {
 
   importChunk(snapshot, options = {}) {
     if (snapshot.worldId !== this.worldId || snapshot.seed !== this.seed ||
-        snapshot.tileSetId !== this.tileSetId) {
-      throw new Error("Chunk belongs to another world or tile set.");
+        snapshot.tileSetId !== this.tileSetId || snapshot.biomeSetId !== this.biomeSetId) {
+      throw new Error("Chunk belongs to another world, tile set, or biome set.");
     }
     if (!Array.isArray(snapshot.cells) || snapshot.cells.length !== this.chunkSize ** 2) {
       throw new Error("Invalid chunk cell data.");
@@ -588,6 +718,12 @@ export default class World {
           color = [below[0] * 0.46, below[1] * 0.46, below[2] * 0.46];
         }
         const tile = this.tileById.get(material);
+        const biome = this.getBiomeAt(x, y);
+        color = [
+          color[0] * biome.tint[0],
+          color[1] * biome.tint[1],
+          color[2] * biome.tint[2],
+        ];
         const grain = tile?.solid ? (this.hash(x, y, this.altitude) * 17 | 0) - 8 : 0;
         const i = (sy * viewport.width + sx) * 4;
         data[i] = this.#clamp(color[0] + grain, 0, 255);
@@ -642,6 +778,12 @@ export default class World {
       worldId: this.worldId,
       seed: this.seed,
       tileSetId: this.tileSetId,
+      biomeSetId: this.biomeSetId,
+      biomes: this.biomes,
+      biomeCenter: { ...this.biomeCenter },
+      spawnRadius: this.spawnRadius,
+      biomeWarpStrength: this.biomeWarpStrength,
+      biomeWarpScale: this.biomeWarpScale,
       width: this.width,
       height: this.height,
       chunkSize: this.chunkSize,

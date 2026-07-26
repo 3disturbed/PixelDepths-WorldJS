@@ -74,6 +74,12 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `actorId` | `client` | Unique local peer identity |
 | `tiles` | `World.TILES` | JSON-compatible tile definitions |
 | `tileSetId` | `worldjs-default-v1` | Version identity for the tile schema |
+| `biomes` | `World.BIOMES` | Center-out biome definitions from `Biomes.json` |
+| `biomeSetId` | `worldjs-center-out-v1` | Multiplayer biome-schema version |
+| `biomeCenterX`, `biomeCenterY` | world center | Spawn and radial-biome origin |
+| `spawnRadius` | 3.5% of shortest side | Guaranteed central spawn biome |
+| `biomeWarpStrength` | `0.065` | Irregularity applied to circular boundaries |
+| `biomeWarpScale` | world size ÷ 11 | Scale of biome-boundary noise |
 | `brushRadius` | `7` | Default mining radius |
 | `cameraX`, `cameraY` | world center | Initial camera center |
 | `zoom` | `5` | CSS pixels per terrain cell |
@@ -155,6 +161,74 @@ const world = new World(canvas, {
 The class clones and validates the object, so later changes to the source object do not silently mutate a running world. IDs must be unique. The eight generator keys—`air`, `water`, `sand`, `grass`, `soil`, `stone`, `ore`, and `crystal`—must remain present with IDs `0–7`. Additional tile definitions may use any unused ID through `255`.
 
 `tileSetId` is included in change packets, chunk snapshots, and saves. Multiplayer peers reject data from a different tile schema. Increase it whenever tile IDs or their gameplay meaning changes.
+
+## Center-out biomes
+
+Biome data lives in [Biomes.json](./Biomes.json). There is no separate biome class: `World.js` loads the JSON object and owns biome lookup, spawn placement, radial noise, terrain generation, rendering tints, saves, and multiplayer validation.
+
+```js
+const [tiles, biomes] = await Promise.all([
+  World.loadTiles("./tiles.json"),
+  World.loadBiomes("./Biomes.json")
+]);
+
+const world = new World(canvas, {
+  tiles,
+  biomes,
+  worldId: "realm-01",
+  biomeSetId: "realm-biomes-v1"
+});
+```
+
+The exact center of the world is the spawn point:
+
+```js
+const spawn = world.getSpawn();
+// { x, y, radius }
+```
+
+Biomes progress outward in overlapping radius bands. Large, low-frequency noise warps their boundaries so they form natural regions instead of perfect circles. The protected center always selects the first biome and suppresses caves while forcing the surface above sea level.
+
+```js
+const biome = world.getBiomeAt(player.x, player.y);
+
+console.log({
+  key: biome.key,
+  name: biome.name,
+  danger: biome.danger,
+  distanceFromCenter: biome.radialDistance,
+  isSpawn: biome.isSpawn
+});
+```
+
+Each entry in `Biomes.json` contains:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Stable numeric biome ID |
+| `name` | Display name |
+| `start`, `end` | Normalized radial range from center to outer corners |
+| `heightBias` | Adds lowlands or raised terrain |
+| `ridgeStrength` | Controls mountain intensity |
+| `caveThreshold` | Controls cave frequency; lower values create more caves |
+| `oreThreshold` | Controls ore frequency; lower values create more ore |
+| `surface`, `shallow` | Keys referencing entries in `tiles.json` |
+| `tint` | RGB multipliers applied during rendering |
+| `danger` | Game-facing progression metadata |
+
+The included progression is:
+
+1. Spawn Meadows
+2. Greenwood
+3. Sunken Mire
+4. Stone Highlands
+5. Deepwild
+6. Frostlands
+7. Ember Reach
+
+Ranges may overlap. At a coordinate, `World.getBiomeAt()` selects the biome whose band center best matches the warped radial distance. Keep the first biome starting at `0`, and ensure the last biome extends beyond `1` so every corner is covered.
+
+`biomeSetId` travels with deltas and chunk snapshots. Multiplayer peers reject incompatible biome generation rules before applying terrain changes.
 
 ## Camera and rendering
 
