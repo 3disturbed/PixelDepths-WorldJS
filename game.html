@@ -37,7 +37,7 @@
       height: 100%;
       background: #0b1415;
       image-rendering: pixelated;
-      cursor: crosshair;
+      cursor: default;
       touch-action: none;
     }
     .hud { position: fixed; inset: 0; pointer-events: none; }
@@ -48,7 +48,7 @@
       gap: 12px;
       padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
     }
-    .brand, .readouts, .help, .status-card {
+    .brand, .readouts, .help, .status-card, .fullscreen {
       border: 1px solid var(--line);
       background: var(--panel);
       backdrop-filter: blur(12px);
@@ -73,6 +73,15 @@
     .readout strong { display: block; overflow: hidden; margin-top: 5px; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
     .readout .ok { color: var(--acid); }
     .readout .fallback { color: #e8b55f; }
+    .fullscreen {
+      flex: 0 0 48px;
+      min-height: 48px;
+      pointer-events: auto;
+      color: var(--acid);
+      cursor: pointer;
+      font-size: 18px;
+    }
+    .fullscreen:hover, .fullscreen:active { border-color: var(--acid); background: #1d2a2be8; }
     .left-rail { position: absolute; top: 92px; left: max(12px, env(safe-area-inset-left)); display: grid; gap: 10px; }
     .status-card { min-width: 154px; padding: 11px 12px; }
     .status-card label { display: flex; justify-content: space-between; color: var(--muted); font-size: 7px; letter-spacing: .1em; }
@@ -158,14 +167,14 @@
       .readout:nth-child(n+4) { border-top: 1px solid var(--line); }
       .help { display: none; }
       .os-joypad { position: absolute; inset: auto max(28px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left)); display: flex; align-items: flex-end; justify-content: space-between; pointer-events: none; }
-      .os-joypad__stick { position: relative; width: 132px; height: 132px; border: 1px solid #9aaba466; border-radius: 50%; background: #101a1bb8; box-shadow: inset 0 0 32px #0008; pointer-events: auto; touch-action: none; }
-      .os-joypad__knob { position: absolute; left: 36px; top: 36px; width: 58px; height: 58px; border: 1px solid #ddec6488; border-radius: 50%; background: #53615bcc; box-shadow: 0 8px 20px #0008; pointer-events: none; }
-      .os-joypad__buttons { position: relative; width: 148px; height: 132px; pointer-events: auto; }
-      .os-joypad__button { position: absolute; width: 54px; height: 54px; border: 1px solid #8d9b9488; border-radius: 50%; background: #152021df; color: var(--paper); font-size: 14px; touch-action: none; }
-      .os-joypad__button.primary { right: 0; top: 39px; width: 64px; height: 64px; color: var(--acid); border-color: #ddec6488; }
-      .os-joypad__button[data-action="interact"] { right: 54px; top: 0; }
-      .os-joypad__button[data-action="dodge"] { right: 58px; bottom: 0; }
-      .os-joypad__button[data-action="menu"] { left: 0; top: 39px; }
+      .os-joypad__stick { position: relative; width: min(228px, 42vw); height: min(228px, 42vw); border: 1px solid #9aaba466; border-radius: 50%; background: #101a1bb8; box-shadow: inset 0 0 32px #0008; pointer-events: auto; touch-action: none; }
+      .os-joypad__knob { position: absolute; left: 30%; top: 30%; width: 40%; height: 40%; border: 1px solid #ddec6488; border-radius: 50%; background: #53615bcc; box-shadow: 0 8px 20px #0008; pointer-events: none; }
+      .os-joypad__buttons { position: relative; width: min(258px, 46vw); height: min(228px, 42vw); pointer-events: auto; }
+      .os-joypad__button { position: absolute; width: min(94px, 17vw); height: min(94px, 17vw); border: 1px solid #8d9b9488; border-radius: 50%; background: #152021df; color: var(--paper); font-size: clamp(14px, 4vw, 28px); touch-action: none; }
+      .os-joypad__button.primary { right: 0; top: 29%; width: min(111px, 20vw); height: min(111px, 20vw); color: var(--acid); border-color: #ddec6488; }
+      .os-joypad__button[data-action="interact"] { right: 36%; top: 0; }
+      .os-joypad__button[data-action="dodge"] { right: 38%; bottom: 0; }
+      .os-joypad__button[data-action="menu"] { left: 0; top: 29%; }
       .os-joypad__button:active { transform: scale(.92); background: #263536; }
     }
     @media (max-width: 580px) {
@@ -177,6 +186,7 @@
       .readout:nth-child(4) { border-right: 0; }
       .readout:nth-child(6) { display: none; }
       .left-rail { top: 132px; }
+      .fullscreen { flex-basis: 42px; min-height: 42px; }
     }
     @media (hover: none) and (pointer: coarse) and (orientation: landscape) {
       .topbar { padding: max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left)); }
@@ -187,14 +197,10 @@
       .readout { min-width: 64px; padding: 6px 8px; }
       .readout:nth-child(n+4) { display: none; }
       .os-joypad { inset: auto max(40px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left)); }
-      .os-joypad__stick { width: 108px; height: 108px; }
-      .os-joypad__knob { left: 30px; top: 30px; width: 46px; height: 46px; }
-      .os-joypad__buttons { width: 126px; height: 108px; }
-      .os-joypad__button { width: 46px; height: 46px; }
-      .os-joypad__button.primary { top: 27px; width: 56px; height: 56px; }
-      .os-joypad__button[data-action="interact"] { right: 47px; }
-      .os-joypad__button[data-action="dodge"] { right: 50px; }
-      .os-joypad__button[data-action="menu"] { top: 31px; }
+      .os-joypad__stick { width: min(228px, 55vh); height: min(228px, 55vh); }
+      .os-joypad__buttons { width: min(258px, 62vh); height: min(228px, 55vh); }
+      .os-joypad__button { width: min(94px, 23vh); height: min(94px, 23vh); font-size: min(28px, 7vh); }
+      .os-joypad__button.primary { width: min(111px, 27vh); height: min(111px, 27vh); }
     }
   </style>
 </head>
@@ -215,6 +221,7 @@
         <div class="readout"><span>SEED</span><strong id="seed">—</strong></div>
         <div class="readout"><span>ATLAS</span><strong id="atlas">LOADING</strong></div>
       </div>
+      <button class="fullscreen" id="fullscreen" type="button" aria-label="Enter fullscreen" title="Fullscreen">⛶</button>
     </div>
 
     <div class="left-rail">
@@ -234,7 +241,7 @@
 
     <div class="help">
       <div><kbd>WASD</kbd> MOVE &nbsp; <kbd>SHIFT</kbd> SPRINT</div>
-      <div><kbd>CLICK</kbd> MINE &nbsp; <kbd>Q / E</kbd> LAYER &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
+      <div><kbd>SPACE</kbd> MINE FORWARD &nbsp; <kbd>Q / E</kbd> LAYER &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
     </div>
 
     <div class="toast" id="toast"></div>
@@ -308,6 +315,7 @@
       player.attachControls(window);
       const joypad = new OSJoypad({
         root: $(".hud"),
+        radius: 174,
         buttons: [
           { id: "attack", label: "⚒", className: "primary", ariaLabel: "Mine or attack" },
           { id: "interact", label: "E", ariaLabel: "Interact" },
@@ -316,15 +324,14 @@
         ]
       }).bind(player);
       world.setAltitude(player.altitude);
-      world.setCamera(player.x, player.y, 20);
+      world.setCamera(player.x, player.y, 28);
       $("#seed").textContent = currentSeed;
 
       const atlasImage = await world.tilemapReady;
       $("#atlas").textContent = atlasImage ? `${atlasImage.naturalWidth}×${atlasImage.naturalHeight}` : "COLOR FALLBACK";
       $("#atlas").className = atlasImage ? "ok" : "fallback";
 
-      let pointer = { x: player.x, y: player.y };
-      let mineHeld = false;
+      let miningHeld = false;
       let lastMine = 0;
       let lastFrame = performance.now();
       let hudTimer = 0;
@@ -368,29 +375,20 @@
         toast(`WORLD SEED ${currentSeed}`);
       }
 
-      function mine(now) {
+      function mineFromPlayer(now) {
         if (now - lastMine < 110) return;
         lastMine = now;
-        const removed = world.mine(pointer.x, pointer.y, 2.4, world.altitude, {
+        const facing = {
+          north: [0, -2], south: [0, 2], west: [-2, 0], east: [2, 0]
+        }[player.direction];
+        const target = { x: player.x + facing[0], y: player.y + facing[1] };
+        const removed = world.mine(target.x, target.y, 2.4, world.altitude, {
           operationId: `local:${Math.floor(now)}`,
           render: false
         });
         if (removed) toast(`EXCAVATED ${removed} PIXELS`);
       }
 
-      canvas.addEventListener("pointermove", (event) => {
-        pointer = world.eventToWorld(event);
-        world.pointer = { ...pointer, active: true };
-      });
-      canvas.addEventListener("pointerdown", (event) => {
-        mineHeld = true;
-        canvas.setPointerCapture(event.pointerId);
-        pointer = world.eventToWorld(event);
-        mine(performance.now());
-      });
-      canvas.addEventListener("pointerup", () => { mineHeld = false; });
-      canvas.addEventListener("pointercancel", () => { mineHeld = false; });
-      canvas.addEventListener("pointerleave", () => { world.pointer.active = false; });
       canvas.addEventListener("wheel", (event) => {
         event.preventDefault();
         world.zoom = Math.max(6, Math.min(28, world.zoom * (event.deltaY > 0 ? 0.88 : 1.12)));
@@ -399,21 +397,40 @@
       $("#downLayer").addEventListener("click", () => setLayer(world.altitude - 1));
       $("#upLayer").addEventListener("click", () => setLayer(world.altitude + 1));
       $("#reseed").addEventListener("click", reseed);
+      const fullscreenButton = $("#fullscreen");
+      const fullscreenElement = () => document.fullscreenElement ?? document.webkitFullscreenElement;
+      async function toggleFullscreen() {
+        if (fullscreenElement()) {
+          await (document.exitFullscreen?.() ?? document.webkitExitFullscreen?.());
+        } else {
+          await (document.documentElement.requestFullscreen?.() ?? document.documentElement.webkitRequestFullscreen?.());
+        }
+      }
+      function updateFullscreenButton() {
+        const active = Boolean(fullscreenElement());
+        fullscreenButton.textContent = active ? "×" : "⛶";
+        fullscreenButton.setAttribute("aria-label", active ? "Exit fullscreen" : "Enter fullscreen");
+      }
+      fullscreenButton.addEventListener("click", () => toggleFullscreen().catch((error) => toast(error.message)));
+      addEventListener("fullscreenchange", updateFullscreenButton);
+      addEventListener("webkitfullscreenchange", updateFullscreenButton);
       addEventListener("keydown", (event) => {
         if (event.code === "KeyQ") setLayer(world.altitude - 1);
         if (event.code === "KeyE") setLayer(world.altitude + 1);
+        if (event.code === "Space") {
+          event.preventDefault();
+          miningHeld = true;
+          mineFromPlayer(performance.now());
+        }
+      });
+      addEventListener("keyup", (event) => {
+        if (event.code === "Space") miningHeld = false;
       });
 
       joypad.on("action", ({ action, pressed }) => {
         if (action === "attack") {
-          mineHeld = pressed;
-          if (pressed) {
-            const facing = {
-              north: [0, -2], south: [0, 2], west: [-2, 0], east: [2, 0]
-            }[player.direction];
-            pointer = { x: player.x + facing[0], y: player.y + facing[1] };
-            mine(performance.now());
-          }
+          miningHeld = pressed;
+          if (pressed) mineFromPlayer(performance.now());
         }
         if (pressed && action === "interact") toast("INTERACT");
         if (pressed && action === "menu") toast("MENU PLUGIN SLOT");
@@ -446,7 +463,7 @@
         player.enqueueInput(input);
         player.processServerInputs(1);
         player.renderer.update(dt);
-        if (mineHeld) mine(now);
+        if (miningHeld) mineFromPlayer(now);
 
         world.camera.x += (player.x - world.camera.x) * Math.min(1, dt * 9);
         world.camera.y += (player.y - world.camera.y) * Math.min(1, dt * 9);

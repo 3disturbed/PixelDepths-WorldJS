@@ -69,15 +69,20 @@ export default class OSJoypad {
 
   #moveStick(event) {
     const rect = this.stick.getBoundingClientRect();
+    const knobRect = this.knob.getBoundingClientRect();
+    const radius = Math.min(
+      this.radius,
+      Math.max(1, (Math.min(rect.width, rect.height) - Math.max(knobRect.width, knobRect.height)) / 2),
+    );
     let x = event.clientX - rect.left - rect.width / 2;
     let y = event.clientY - rect.top - rect.height / 2;
     const length = Math.hypot(x, y);
-    if (length > this.radius) {
-      x *= this.radius / length;
-      y *= this.radius / length;
+    if (length > radius) {
+      x *= radius / length;
+      y *= radius / length;
     }
-    const nx = x / this.radius;
-    const ny = y / this.radius;
+    const nx = x / radius;
+    const ny = y / radius;
     const magnitude = Math.hypot(nx, ny);
     const scaled = magnitude <= this.deadzone ? 0 : (magnitude - this.deadzone) / (1 - this.deadzone);
     this.moveX = magnitude ? nx / magnitude * Math.min(1, scaled) : 0;
