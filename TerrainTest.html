@@ -274,7 +274,7 @@
   </main>
 
   <script type="module">
-    import World from "./World.js";
+    import World from "./World.js?v=center-out-biomes-1";
 
     const $ = (selector) => document.querySelector(selector);
     const WORLD_SIZE = 16384;
@@ -286,8 +286,9 @@
     let mining = false;
     let pendingPointer = null;
     let animationQueued = false;
-    let nextDeliveryAt = 0;
     let generationToken = 0;
+    let deliveryTimer = null;
+    const deliveryQueue = [];
 
     const primary = new World($("#primary"), {
       worldId: "terrain-test",
@@ -348,7 +349,30 @@
       $("#dirty").textContent = replica.dirtyChunks.size.toLocaleString();
     };
 
-    // This simulates validation and ordering by an authoritative server.
+    function pumpNetwork() {
+      if (deliveryTimer || !deliveryQueue.length) return;
+      const delivery = deliveryQueue[0];
+      deliveryTimer = setTimeout(() => {
+        deliveryTimer = null;
+        deliveryQueue.shift();
+        if (delivery.token === generationToken) {
+          try {
+            primary.applyChanges(delivery.packet, { render: false });
+            const applied = replica.applyChanges(delivery.packet, { render: false });
+            $("#sync").textContent = "IN SYNC";
+            log(`server → B: revision ${delivery.packet.revision}, ${applied} cells applied`, "remote");
+            render();
+          } catch (error) {
+            $("#sync").textContent = "RESYNC REQUIRED";
+            log(error.message, "remote");
+            console.error(error);
+          }
+        }
+        pumpNetwork();
+      }, delivery.latency);
+    }
+
+    // This simulates validation and strictly ordered delivery by an authoritative server.
     primary.on("change", ({ source }) => {
       if (source !== "local") return;
       const clientPacket = primary.drainChanges();
@@ -367,19 +391,9 @@
       log(`A → server: ${authoritative.changes.length} cells, op ${authoritative.changes[0].operationId}`, "local");
 
       const latency = 18 + Math.floor(Math.random() * 35);
-      const token = generationToken;
-      const now = performance.now();
-      nextDeliveryAt = Math.max(now + latency, nextDeliveryAt + 1);
-      const orderedDelay = Math.max(0, nextDeliveryAt - now);
       $("#latency").textContent = `${latency} MS`;
-      setTimeout(() => {
-        if (token !== generationToken) return;
-        primary.applyChanges(authoritative, { render: false });
-        const applied = replica.applyChanges(authoritative, { render: false });
-        $("#sync").textContent = "IN SYNC";
-        log(`server → B: revision ${authoritative.revision}, ${applied} cells applied`, "remote");
-        render();
-      }, orderedDelay);
+      deliveryQueue.push({ packet: authoritative, latency, token: generationToken });
+      pumpNetwork();
     });
 
     const altitudeControls = $("#altitudes");
@@ -447,7 +461,9 @@
     $("#regenerate").addEventListener("click", () => {
       seed += 137;
       generationToken++;
-      nextDeliveryAt = 0;
+      if (deliveryTimer) clearTimeout(deliveryTimer);
+      deliveryTimer = null;
+      deliveryQueue.length = 0;
       serverRevision = 0;
       primary.generate(seed);
       replica.generate(seed);

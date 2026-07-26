@@ -23,7 +23,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js";
+  import World from "./World.js?v=center-out-biomes-1";
 
   const canvas = document.querySelector("#world");
   const world = new World(canvas, {
