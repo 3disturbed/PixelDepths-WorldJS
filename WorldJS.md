@@ -84,6 +84,8 @@ Then open `http://localhost:3000`.
 
 Open `TerrainTest.html` for the included interactive test harness. It provides mining, altitude controls, camera movement, zoom, live chunk statistics, and two simulated clients connected through an ordered authoritative change stream.
 
+Open `game.html` for the playable client. Its initial world uses seed `4182`; pass a deterministic seed in the URL with `game.html?seed=12345`, or use **Generate New Seed** in the HUD. The game uses a smaller spawn plateau than the library default so coastlines, elevation, and terrain variation appear in the opening viewport.
+
 ## Constructor options
 
 | Option | Default | Meaning |

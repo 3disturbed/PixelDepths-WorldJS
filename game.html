@@ -63,7 +63,7 @@
     }
     .brand strong { display: block; font-size: 12px; letter-spacing: .08em; }
     .brand small { display: block; margin-top: 3px; color: var(--muted); font-size: 7px; letter-spacing: .12em; }
-    .readouts { display: grid; grid-template-columns: repeat(5, minmax(70px, 1fr)); }
+    .readouts { display: grid; grid-template-columns: repeat(6, minmax(70px, 1fr)); }
     .readout { min-width: 74px; padding: 9px 11px; border-right: 1px solid var(--line); }
     .readout:last-child { border-right: 0; }
     .readout span { display: block; color: var(--muted); font-size: 7px; letter-spacing: .12em; }
@@ -94,6 +94,19 @@
     .altitude button { width: 28px; height: 25px; }
     .altitude button:hover, .touch button:active, #mineButton:active { border-color: var(--acid); color: var(--acid); }
     .altitude output { min-width: 56px; text-align: center; font-size: 10px; }
+    .reseed {
+      width: 100%;
+      margin-top: 9px;
+      padding: 8px;
+      pointer-events: auto;
+      border: 1px solid #71807877;
+      background: #152021e8;
+      color: var(--acid);
+      cursor: pointer;
+      font-size: 8px;
+      letter-spacing: .1em;
+    }
+    .reseed:hover { border-color: var(--acid); }
     .help {
       position: absolute;
       right: max(12px, env(safe-area-inset-right));
@@ -157,7 +170,7 @@
       .readout:nth-child(2) { border-right: 0; }
       .readout:nth-child(3) { border-right: 1px solid var(--line); border-top: 1px solid var(--line); }
       .readout:nth-child(4) { border-right: 0; }
-      .readout:nth-child(5) { display: none; }
+      .readout:nth-child(6) { display: none; }
       .left-rail { top: 132px; }
     }
   </style>
@@ -176,6 +189,7 @@
         <div class="readout"><span>POSITION</span><strong id="position">—</strong></div>
         <div class="readout"><span>RESOURCES</span><strong id="resources">0</strong></div>
         <div class="readout"><span>CAVES</span><strong id="caves">0</strong></div>
+        <div class="readout"><span>SEED</span><strong id="seed">—</strong></div>
         <div class="readout"><span>ATLAS</span><strong id="atlas">LOADING</strong></div>
       </div>
     </div>
@@ -191,6 +205,7 @@
           <output id="layer">SEA 0</output>
           <button id="upLayer" type="button" aria-label="Raise viewed altitude">+</button>
         </div>
+        <button class="reseed" id="reseed" type="button">GENERATE NEW SEED</button>
       </div>
     </div>
 
@@ -216,7 +231,7 @@
   </div>
 
   <script type="module">
-    import World from "./World.js?v=game-1";
+    import World from "./World.js?v=game-seed-2";
 
     const $ = (selector) => document.querySelector(selector);
     const canvas = $("#game");
@@ -224,17 +239,27 @@
     const loadingText = $("#loadingText");
 
     try {
-      const [tiles, biomes, generation] = await Promise.all([
+      const [tiles, biomes, loadedGeneration] = await Promise.all([
         World.loadTiles("./tiles.json"),
         World.loadBiomes("./Biomes.json"),
         World.loadGeneration("./generation.json")
       ]);
+      const generation = structuredClone(loadedGeneration);
+      // Keep spawn safe but small enough that the first viewport shows coast,
+      // hills, and biome variation instead of one large flat plateau.
+      generation.spawn.radius = 72;
+      generation.spawn.flatRadius = 18;
+      generation.spawn.blendRadius = 54;
+      generation.spawn.clearResourcesRadius = 28;
+      const seedParameter = new URLSearchParams(location.search).get("seed");
+      const requestedSeed = seedParameter == null ? Number.NaN : Number(seedParameter);
+      let currentSeed = Number.isSafeInteger(requestedSeed) ? requestedSeed : 4182;
 
       loadingText.textContent = "BUILDING SPAWN REGION";
       const world = new World(canvas, {
         worldId: "strata-local",
         actorId: "local-authority",
-        seed: 4182,
+        seed: currentSeed,
         width: 16384,
         height: 16384,
         chunkSize: 64,
@@ -262,7 +287,8 @@
       });
       player.attachControls(window);
       world.setAltitude(player.altitude);
-      world.setCamera(player.x, player.y, generation.rendering.fallbackCellSize);
+      world.setCamera(player.x, player.y, 10);
+      $("#seed").textContent = currentSeed;
 
       const atlasImage = await world.tilemapReady;
       $("#atlas").textContent = atlasImage ? `${atlasImage.naturalWidth}×${atlasImage.naturalHeight}` : "COLOR FALLBACK";
@@ -287,6 +313,30 @@
         $("#layer").textContent = world.altitude === 0
           ? "SEA 0"
           : `${world.altitude > 0 ? "+" : ""}${world.altitude}`;
+      }
+
+      function reseed() {
+        const random = new Uint32Array(1);
+        crypto.getRandomValues(random);
+        currentSeed = random[0] || 1;
+        world.generate(currentSeed);
+        const spawn = world.getSpawn();
+        player.teleport(
+          spawn.x,
+          spawn.y,
+          world.getSurfaceAltitude(spawn.x, spawn.y),
+          { report: false }
+        );
+        player.inputSequence = 0;
+        player.lastProcessedInput = 0;
+        player.serverTick = 0;
+        player.serverInputQueue.length = 0;
+        world.camera.x = player.x;
+        world.camera.y = player.y;
+        setLayer(player.altitude);
+        $("#seed").textContent = currentSeed;
+        history.replaceState(null, "", `${location.pathname}?seed=${currentSeed}`);
+        toast(`WORLD SEED ${currentSeed}`);
       }
 
       function mine(now) {
@@ -319,6 +369,7 @@
 
       $("#downLayer").addEventListener("click", () => setLayer(world.altitude - 1));
       $("#upLayer").addEventListener("click", () => setLayer(world.altitude + 1));
+      $("#reseed").addEventListener("click", reseed);
       addEventListener("keydown", (event) => {
         if (event.code === "KeyQ") setLayer(world.altitude - 1);
         if (event.code === "KeyE") setLayer(world.altitude + 1);
