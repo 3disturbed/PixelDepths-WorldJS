@@ -132,7 +132,7 @@
       transition: .18s ease;
     }
     .toast.show { transform: translate(-50%, 0); opacity: 1; }
-    .touch { display: none; }
+    .os-joypad { display: none; }
     .loading {
       position: fixed;
       inset: 0;
@@ -154,14 +154,16 @@
       .readout:nth-child(3) { border-right: 0; }
       .readout:nth-child(n+4) { border-top: 1px solid var(--line); }
       .help { display: none; }
-      .touch { position: absolute; inset: auto 0 max(16px, env(safe-area-inset-bottom)); display: flex; justify-content: space-between; padding: 0 16px; }
-      .dpad { position: relative; width: 126px; height: 126px; pointer-events: auto; }
-      .touch button { position: absolute; width: 42px; height: 42px; border-radius: 4px; font-size: 16px; touch-action: none; }
-      .touch [data-control="up"] { top: 0; left: 42px; }
-      .touch [data-control="down"] { bottom: 0; left: 42px; }
-      .touch [data-control="left"] { top: 42px; left: 0; }
-      .touch [data-control="right"] { top: 42px; right: 0; }
-      #mineButton { position: static; align-self: flex-end; width: 82px; height: 82px; border-radius: 50%; color: var(--acid); }
+      .os-joypad { position: absolute; inset: auto 0 max(18px, env(safe-area-inset-bottom)); display: flex; align-items: flex-end; justify-content: space-between; padding: 0 18px; pointer-events: none; }
+      .os-joypad__stick { position: relative; width: 132px; height: 132px; border: 1px solid #9aaba466; border-radius: 50%; background: #101a1bb8; box-shadow: inset 0 0 32px #0008; pointer-events: auto; touch-action: none; }
+      .os-joypad__knob { position: absolute; left: 36px; top: 36px; width: 58px; height: 58px; border: 1px solid #ddec6488; border-radius: 50%; background: #53615bcc; box-shadow: 0 8px 20px #0008; pointer-events: none; }
+      .os-joypad__buttons { position: relative; width: 148px; height: 132px; pointer-events: auto; }
+      .os-joypad__button { position: absolute; width: 54px; height: 54px; border: 1px solid #8d9b9488; border-radius: 50%; background: #152021df; color: var(--paper); font-size: 14px; touch-action: none; }
+      .os-joypad__button.primary { right: 0; top: 39px; width: 64px; height: 64px; color: var(--acid); border-color: #ddec6488; }
+      .os-joypad__button[data-action="interact"] { right: 54px; top: 0; }
+      .os-joypad__button[data-action="dodge"] { right: 58px; bottom: 0; }
+      .os-joypad__button[data-action="menu"] { left: 0; top: 39px; }
+      .os-joypad__button:active { transform: scale(.92); background: #263536; }
     }
     @media (max-width: 580px) {
       .brand small { display: none; }
@@ -214,15 +216,6 @@
       <div><kbd>CLICK</kbd> MINE &nbsp; <kbd>Q / E</kbd> LAYER &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
     </div>
 
-    <div class="touch">
-      <div class="dpad">
-        <button data-control="up" type="button">▲</button>
-        <button data-control="down" type="button">▼</button>
-        <button data-control="left" type="button">◀</button>
-        <button data-control="right" type="button">▶</button>
-      </div>
-      <button id="mineButton" type="button">MINE</button>
-    </div>
     <div class="toast" id="toast"></div>
   </div>
 
@@ -231,7 +224,8 @@
   </div>
 
   <script type="module">
-    import World from "./World.js?v=game-seed-2";
+    import World from "./World.js?v=player-render-3";
+    import OSJoypad from "./OSJoypad.js?v=1";
 
     const $ = (selector) => document.querySelector(selector);
     const canvas = $("#game");
@@ -286,6 +280,15 @@
         fallbackColor: "#ddec64"
       });
       player.attachControls(window);
+      const joypad = new OSJoypad({
+        root: $(".hud"),
+        buttons: [
+          { id: "attack", label: "⚒", className: "primary", ariaLabel: "Mine or attack" },
+          { id: "interact", label: "E", ariaLabel: "Interact" },
+          { id: "dodge", label: "⇧", ariaLabel: "Sprint" },
+          { id: "menu", label: "☰", ariaLabel: "Menu" }
+        ]
+      }).bind(player);
       world.setAltitude(player.altitude);
       world.setCamera(player.x, player.y, 10);
       $("#seed").textContent = currentSeed;
@@ -375,31 +378,20 @@
         if (event.code === "KeyE") setLayer(world.altitude + 1);
       });
 
-      for (const button of document.querySelectorAll(".dpad button")) {
-        const control = button.dataset.control;
-        const press = (event) => {
-          event.preventDefault();
-          player.controls[control] = true;
-          button.setPointerCapture?.(event.pointerId);
-        };
-        const release = (event) => {
-          event.preventDefault();
-          player.controls[control] = false;
-        };
-        button.addEventListener("pointerdown", press);
-        button.addEventListener("pointerup", release);
-        button.addEventListener("pointercancel", release);
-      }
-      $("#mineButton").addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        mineHeld = true;
-        const facing = {
-          north: [0, -2], south: [0, 2], west: [-2, 0], east: [2, 0]
-        }[player.direction];
-        pointer = { x: player.x + facing[0], y: player.y + facing[1] };
-        mine(performance.now());
+      joypad.on("action", ({ action, pressed }) => {
+        if (action === "attack") {
+          mineHeld = pressed;
+          if (pressed) {
+            const facing = {
+              north: [0, -2], south: [0, 2], west: [-2, 0], east: [2, 0]
+            }[player.direction];
+            pointer = { x: player.x + facing[0], y: player.y + facing[1] };
+            mine(performance.now());
+          }
+        }
+        if (pressed && action === "interact") toast("INTERACT");
+        if (pressed && action === "menu") toast("MENU PLUGIN SLOT");
       });
-      $("#mineButton").addEventListener("pointerup", () => { mineHeld = false; });
 
       const resize = () => world.resize();
       addEventListener("resize", resize);
@@ -427,6 +419,7 @@
         const input = player.createInput(player.sampleControls(), dt);
         player.enqueueInput(input);
         player.processServerInputs(1);
+        player.renderer.update(dt);
         if (mineHeld) mine(now);
 
         world.camera.x += (player.x - world.camera.x) * Math.min(1, dt * 9);

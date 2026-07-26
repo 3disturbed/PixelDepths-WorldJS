@@ -1,4 +1,5 @@
 import PlayerPlugin from "./Player-Plugin.js";
+import PlayerRender from "./Player-Render.js";
 
 /**
  * Player.js
@@ -35,6 +36,11 @@ export default class Player {
     this.radius = Math.max(0.1, Number(options.radius ?? 0.38));
     this.speed = Math.max(0, Number(options.speed ?? 5));
     this.sprintMultiplier = Math.max(1, Number(options.sprintMultiplier ?? 1.65));
+    this.acceleration = Math.max(0.01, Number(options.acceleration ?? 28));
+    this.deceleration = Math.max(0.01, Number(options.deceleration ?? 36));
+    this.airControl = Math.max(0, Math.min(1, Number(options.airControl ?? 0.35)));
+    this.controlDeadzone = Math.max(0, Math.min(0.95, Number(options.controlDeadzone ?? 0.16)));
+    this.gamepadIndex = Math.max(0, Math.trunc(options.gamepadIndex ?? 0));
     this.maxStep = Math.max(0, Number(options.maxStep ?? 1));
     this.maxDrop = Math.max(0, Number(options.maxDrop ?? 2));
     this.canSwim = options.canSwim !== false;
@@ -49,6 +55,8 @@ export default class Player {
     this.sprinting = false;
     this.falling = false;
     this.verticalVelocity = 0;
+    this.velocityX = 0;
+    this.velocityY = 0;
     this.inputSequence = 0;
     this.lastProcessedInput = 0;
     this.serverTick = 0;
@@ -57,26 +65,22 @@ export default class Player {
     this.controls = { up: false, down: false, left: false, right: false, sprint: false };
     this.controlTarget = null;
     this.controlHandlers = null;
+    this.controlSources = new Set();
     this.onSendInput = typeof options.onSendInput === "function" ? options.onSendInput : null;
     this.onSendSnapshot = typeof options.onSendSnapshot === "function" ? options.onSendSnapshot : null;
     this.listeners = new Map();
     this.plugins = new Map();
     this.installingPlugins = new Set();
 
-    this.spriteSize = 16;
-    this.renderSize = Math.max(1, Number(options.renderSize ?? 16));
-    this.spriteUrl = String(options.spriteUrl ?? "./player.png");
-    this.sprite = null;
-    this.spriteReady = Promise.resolve(null);
-    this.fallbackColor = String(options.fallbackColor ?? "#f3e56b");
-    this.frame = 0;
-    this.animationTime = 0;
-    this.animationRate = Math.max(1, Number(options.animationRate ?? 8));
-    if (options.sprite && typeof options.sprite === "object") {
-      this.setSprite(options.sprite);
-    } else if (options.sprite !== false && typeof globalThis.Image === "function") {
-      this.spriteReady = this.loadSprite(this.spriteUrl);
-    }
+    this.renderer = new PlayerRender(this, {
+      ...options.rendering,
+      sprite: options.sprite,
+      spriteUrl: options.spriteUrl,
+      renderSize: options.renderSize,
+      fallbackColor: options.fallbackColor,
+      animationRate: options.animationRate,
+    });
+    this.spriteReady = this.renderer.ready;
     for (const entry of options.plugins ?? []) {
       if (typeof entry === "string" || entry instanceof PlayerPlugin) this.usePlugin(entry);
       else this.usePlugin(entry.plugin ?? entry.id, entry.config ?? {});
@@ -165,36 +169,12 @@ export default class Player {
   }
 
   setSprite(image) {
-    const width = Number(image?.naturalWidth ?? image?.width ?? 0);
-    const height = Number(image?.naturalHeight ?? image?.height ?? 0);
-    if (!image || width < 16 || height < 16) {
-      this.sprite = null;
-      this.emit("spriteerror", { url: this.spriteUrl, reason: "invalid-image" });
-      return false;
-    }
-    this.sprite = image;
-    this.emit("spriteload", { url: this.spriteUrl, width, height });
-    return true;
+    return this.renderer.setSprite(image);
   }
 
-  loadSprite(url = this.spriteUrl, options = {}) {
-    this.spriteUrl = String(url);
-    if (typeof globalThis.Image !== "function") return Promise.resolve(null);
-    return new Promise((resolve) => {
-      const image = new Image();
-      if (options.crossOrigin != null) image.crossOrigin = options.crossOrigin;
-      image.decoding = "async";
-      image.onload = () => {
-        this.setSprite(image);
-        resolve(image);
-      };
-      image.onerror = () => {
-        this.sprite = null;
-        this.emit("spriteerror", { url: this.spriteUrl, reason: "load-failed" });
-        resolve(null);
-      };
-      image.src = this.spriteUrl;
-    });
+  loadSprite(url = this.renderer.spriteUrl, options = {}) {
+    this.spriteReady = this.renderer.loadSprite(url, options);
+    return this.spriteReady;
   }
 
   attachControls(target = globalThis) {
@@ -239,15 +219,44 @@ export default class Player {
     for (const key of Object.keys(this.controls)) this.controls[key] = false;
   }
 
+  addControlSource(source) {
+    if (!source || typeof source.sampleControls !== "function") {
+      throw new TypeError("Control source must implement sampleControls().");
+    }
+    this.controlSources.add(source);
+    return () => this.controlSources.delete(source);
+  }
+
   sampleControls() {
     let moveX = Number(this.controls.right) - Number(this.controls.left);
     let moveY = Number(this.controls.down) - Number(this.controls.up);
+    let sprint = Boolean(this.controls.sprint);
+    const gamepad = globalThis.navigator?.getGamepads?.()?.[this.gamepadIndex];
+    if (gamepad?.connected) {
+      const axisX = applyDeadzone(Number(gamepad.axes[0] ?? 0), this.controlDeadzone);
+      const axisY = applyDeadzone(Number(gamepad.axes[1] ?? 0), this.controlDeadzone);
+      if (Math.hypot(axisX, axisY) > Math.hypot(moveX, moveY)) {
+        moveX = axisX;
+        moveY = axisY;
+      }
+      sprint ||= Boolean(gamepad.buttons[0]?.pressed || gamepad.buttons[10]?.pressed);
+    }
+    for (const source of this.controlSources) {
+      const sampled = source.sampleControls() ?? {};
+      const sourceX = Number(sampled.moveX ?? 0);
+      const sourceY = Number(sampled.moveY ?? 0);
+      if (Math.hypot(sourceX, sourceY) > Math.hypot(moveX, moveY)) {
+        moveX = sourceX;
+        moveY = sourceY;
+      }
+      sprint ||= Boolean(sampled.sprint);
+    }
     const length = Math.hypot(moveX, moveY);
     if (length > 1) {
       moveX /= length;
       moveY /= length;
     }
-    return { moveX, moveY, sprint: Boolean(this.controls.sprint) };
+    return { moveX, moveY, sprint };
   }
 
   createInput(controls = this.sampleControls(), deltaSeconds = 1 / 60) {
@@ -368,12 +377,17 @@ export default class Player {
     };
     this.runPluginHook("beforeMove", movement);
     if (movement.cancelled) return { cancelled: true, blocked: true, reason: "plugin" };
-    const distance = movement.speed * (sprinting ? movement.sprintMultiplier : 1) * dt;
-    const dx = movement.moveX * distance;
-    const dy = movement.moveY * distance;
-    this.moving = Math.abs(dx) + Math.abs(dy) > 0.0001;
+    const targetSpeed = movement.speed * (sprinting ? movement.sprintMultiplier : 1);
+    const hasInput = Math.hypot(movement.moveX, movement.moveY) > 0.001;
+    const response = hasInput ? this.acceleration : this.deceleration;
+    const control = this.falling ? this.airControl : 1;
+    this.velocityX = approach(this.velocityX, movement.moveX * targetSpeed, response * control * dt);
+    this.velocityY = approach(this.velocityY, movement.moveY * targetSpeed, response * control * dt);
+    const dx = this.velocityX * dt;
+    const dy = this.velocityY * dt;
+    this.moving = Math.hypot(this.velocityX, this.velocityY) > 0.025;
     this.sprinting = sprinting && this.moving;
-    if (this.moving) this.#updateDirection(moveX, moveY);
+    if (this.moving) this.#updateDirection(this.velocityX, this.velocityY);
 
     const result = this.world.moveEntity(this, dx, dy, {
       radius: this.radius,
@@ -388,6 +402,8 @@ export default class Player {
       this.altitude = result.drop.fromAltitude;
       this.verticalVelocity = 0;
     }
+    if (result.blockedX || (result.blocked && !result.blockedY)) this.velocityX = 0;
+    if (result.blockedY || (result.blocked && !result.blockedX)) this.velocityY = 0;
     this.runPluginHook("afterMove", { input, movement, result, ...context });
     this.runPluginHook("afterInput", { input, result, ...context });
     this.emit("move", { input, result, ...context });
@@ -423,6 +439,8 @@ export default class Player {
       sprinting: this.sprinting,
       falling: this.falling,
       verticalVelocity: this.verticalVelocity,
+      velocityX: this.velocityX,
+      velocityY: this.velocityY,
       plugins,
     };
     this.runPluginHook("beforeSnapshot", { snapshot, cancelled: false });
@@ -457,12 +475,20 @@ export default class Player {
 
     const error = Math.hypot(this.x - snapshot.x, this.y - snapshot.y);
     const altitudeError = Math.abs(this.altitude - snapshot.altitude);
-    const corrected = error > this.reconcileThreshold || altitudeError > this.reconcileThreshold;
+    const velocityError = Math.hypot(
+      this.velocityX - Number(snapshot.velocityX ?? 0),
+      this.velocityY - Number(snapshot.velocityY ?? 0),
+    );
+    const corrected = error > this.reconcileThreshold ||
+      altitudeError > this.reconcileThreshold ||
+      velocityError > this.reconcileThreshold;
     let replayed = 0;
     if (corrected) {
       this.x = snapshot.x;
       this.y = snapshot.y;
       this.altitude = snapshot.altitude;
+      this.velocityX = Number(snapshot.velocityX ?? 0);
+      this.velocityY = Number(snapshot.velocityY ?? 0);
       const replay = this.pendingInputs.slice();
       for (const input of replay) this.#applyInput(input, { replayed: true });
       replayed = replay.length;
@@ -474,84 +500,20 @@ export default class Player {
       snapshot,
       error,
       altitudeError,
+      velocityError,
       corrected,
       replayed,
     });
     this.runPluginHook("afterSnapshot", { snapshot, corrected, replayed });
-    return { ignored: false, corrected, error, altitudeError, replayed };
+    return { ignored: false, corrected, error, altitudeError, velocityError, replayed };
   }
 
   #animate(deltaSeconds) {
-    if (!this.moving) {
-      this.frame = 0;
-      this.animationTime = 0;
-      return;
-    }
-    this.animationTime += deltaSeconds * this.animationRate * (this.sprinting ? 1.35 : 1);
-    this.frame = Math.floor(this.animationTime) % 4;
+    this.renderer.update(deltaSeconds);
   }
 
   render(ctx = this.world.ctx, options = {}) {
-    const viewport = this.world.getViewport();
-    if (this.x < viewport.x || this.y < viewport.y ||
-        this.x >= viewport.x + viewport.width || this.y >= viewport.y + viewport.height) return false;
-    const cellWidth = this.world.canvas.width / viewport.width;
-    const cellHeight = this.world.canvas.height / viewport.height;
-    const size = Number(options.renderSize ?? this.renderSize) *
-      Math.min(cellWidth, cellHeight) / this.world.tileSize;
-    const screenX = (this.x - viewport.x) * cellWidth;
-    const screenY = (this.y - viewport.y) * cellHeight;
-    const directionRow = { south: 0, west: 1, east: 2, north: 3 }[this.direction] ?? 0;
-    const frame = this.moving ? this.frame : 0;
-    const sourceX = frame * 16;
-    const sourceY = directionRow * 16;
-    const spriteWidth = Number(this.sprite?.naturalWidth ?? this.sprite?.width ?? 0);
-    const spriteHeight = Number(this.sprite?.naturalHeight ?? this.sprite?.height ?? 0);
-
-    const renderContext = {
-      ctx,
-      options,
-      viewport,
-      screenX,
-      screenY,
-      size,
-      cancelled: false,
-    };
-    this.runPluginHook("beforeRender", renderContext);
-    if (renderContext.cancelled) return false;
-    ctx.save();
-    if (this.sprite && sourceX + 16 <= spriteWidth && sourceY + 16 <= spriteHeight) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(
-        this.sprite,
-        sourceX,
-        sourceY,
-        16,
-        16,
-        screenX - size / 2,
-        screenY - size * 0.72,
-        size,
-        size,
-      );
-    } else {
-      ctx.fillStyle = options.fallbackColor ?? this.fallbackColor;
-      ctx.strokeStyle = "#11191b";
-      ctx.lineWidth = Math.max(1, size * 0.08);
-      ctx.beginPath();
-      ctx.arc(screenX, screenY, Math.max(2, size * 0.28), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(screenX, screenY);
-      const facing = {
-        north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0],
-      }[this.direction];
-      ctx.lineTo(screenX + facing[0] * size * 0.36, screenY + facing[1] * size * 0.36);
-      ctx.stroke();
-    }
-    ctx.restore();
-    this.runPluginHook("afterRender", renderContext);
-    return true;
+    return this.renderer.render(ctx, options);
   }
 
   teleport(x, y, altitude = null, options = {}) {
@@ -560,8 +522,11 @@ export default class Player {
     this.y = Number(y);
     this.altitude = Number(altitude ?? this.world.getSurfaceAltitude(x, y) ?? this.world.minAltitude);
     this.verticalVelocity = 0;
+    this.velocityX = 0;
+    this.velocityY = 0;
     this.falling = false;
     this.pendingInputs.length = 0;
+    this.renderer.snap();
     if (options.report !== false) this.emit("teleport", this.createSnapshot());
   }
 
@@ -584,6 +549,7 @@ export default class Player {
     }
     this.pendingInputs.length = 0;
     this.serverInputQueue.length = 0;
+    this.controlSources.clear();
     this.listeners.clear();
     this.world.removePlayer?.(this.id, { destroy: false });
   }
@@ -592,4 +558,16 @@ export default class Player {
 function cloneData(value) {
   if (typeof globalThis.structuredClone === "function") return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
+}
+
+function approach(current, target, amount) {
+  if (current < target) return Math.min(target, current + amount);
+  if (current > target) return Math.max(target, current - amount);
+  return target;
+}
+
+function applyDeadzone(value, deadzone) {
+  const magnitude = Math.abs(value);
+  if (magnitude <= deadzone) return 0;
+  return Math.sign(value) * ((magnitude - deadzone) / (1 - deadzone));
 }

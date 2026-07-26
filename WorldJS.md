@@ -10,8 +10,10 @@ It targets modern evergreen browsers with ES2022 class-field and private-method 
 | --- | --- |
 | `World.js` | Generation, chunks, rendering, destruction, saves, and multiplayer deltas |
 | `World-Collision.js` | Terrain collision, surface walking, ledges, falling, raycasts, and reports |
-| `Player.js` | Server authority, client prediction, controls, movement, and player rendering |
+| `Player.js` | Server authority, client prediction, control sampling, and movement |
+| `Player-Render.js` | Sprite loading, animation, shadows, and presentation smoothing |
 | `Player-Plugin.js` | Base contract for modular player systems |
+| `OSJoypad.js` | Phone analog stick and configurable RPG action buttons |
 | `tiles.json` | Pixel materials and resource materials |
 | `Biomes.json` | The five radial biomes and biome-specific content |
 | `generation.json` | Terrain shape, sea level, spawn, caves, and resource placement |
@@ -37,7 +39,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=player-plugins-8";
+  import World from "./World.js?v=player-render-9";
 
   const canvas = document.querySelector("#world");
   const [tiles, biomes, generation] = await Promise.all([
@@ -760,6 +762,11 @@ world.removePlayer("player-42");
 | `radius` | `0.38` | Collision footprint |
 | `speed` | `5` | Cells per second |
 | `sprintMultiplier` | `1.65` | Sprint speed multiplier |
+| `acceleration` | `28` | Speed gained per second for responsive starts |
+| `deceleration` | `36` | Speed removed per second after releasing movement |
+| `airControl` | `0.35` | Fraction of normal acceleration while falling |
+| `controlDeadzone` | `0.16` | Browser gamepad analog deadzone |
+| `gamepadIndex` | `0` | Browser gamepad slot to sample |
 | `maxStep` | `1` | Highest automatically traversable rise |
 | `maxDrop` | `2` | Highest safe automatic drop |
 | `canSwim` | `true` | Whether surface movement may enter water |
@@ -770,6 +777,7 @@ world.removePlayer("player-42");
 | `spriteUrl` | `./player.png` | Optional player sprite sheet |
 | `renderSize` | `16` | Player display size on the 16×16 grid |
 | `fallbackColor` | `#f3e56b` | Color used when the sprite is unavailable |
+| `rendering` | `{}` | `PlayerRender` smoothing, animation, bob, and shadow options |
 | `onSendInput` | `null` | Client transport callback |
 | `onSendSnapshot` | `null` | Server transport callback |
 
@@ -810,6 +818,8 @@ Controls:
 | --- | --- |
 | `W A S D` or arrows | Normalized eight-direction movement |
 | Left or right Shift | Sprint |
+| Gamepad left stick | Analog movement |
+| Gamepad A / left-stick click | Sprint |
 
 Each client update:
 
@@ -833,7 +843,40 @@ Input shape:
 }
 ```
 
-Movement vectors are normalized, values are clamped, and `delta` cannot exceed `maxInputDelta`.
+Movement vectors are normalized, values are clamped, and `delta` cannot exceed `maxInputDelta`. Movement accelerates toward the requested velocity and decelerates after release. The velocity is part of authoritative state so reconciliation and replay remain deterministic.
+
+### Phone joypad and RPG buttons
+
+`OSJoypad.js` is a DOM-based, dependency-free phone controller. It feeds full analog values into `Player.sampleControls()` alongside keyboard and browser gamepad input:
+
+```js
+import OSJoypad from "./OSJoypad.js";
+
+const joypad = new OSJoypad({
+  root: document.querySelector(".hud"),
+  buttons: [
+    { id: "attack", label: "A", className: "primary" },
+    { id: "interact", label: "B" },
+    { id: "dodge", label: "X" },
+    { id: "menu", label: "Y" }
+  ]
+}).bind(localPlayer);
+
+joypad.on("action", ({ action, pressed }) => {
+  if (action === "attack" && pressed) attack();
+  if (action === "interact" && pressed) interact();
+});
+```
+
+`dodge` is exposed as sprint by the default `sampleControls()` implementation. Use `isPressed(action)` for held actions, `setVisible(boolean)` to switch control schemes, and `destroy()` when leaving the game. `game.html` includes a complete responsive layout and maps attack to mining.
+
+Any custom input device can integrate without changing `Player.js`:
+
+```js
+const detach = player.addControlSource({
+  sampleControls: () => ({ moveX, moveY, sprint })
+});
+```
 
 ### Server authority
 
@@ -889,7 +932,9 @@ Snapshot shape:
   moving: true,
   sprinting: false,
   falling: false,
-  verticalVelocity: 0
+  verticalVelocity: 0,
+  velocityX: 2.4,
+  velocityY: -1.1
 }
 ```
 
@@ -918,6 +963,20 @@ socket.addEventListener("message", ({ data }) => {
 6. Replays remaining unacknowledged inputs through the same collision code.
 
 Because server and client use the same seed, JSON schemas, terrain deltas, and `WorldCollision`, ordinary predictions converge without correction. A terrain revision should be delivered before any player snapshot that depends on it.
+
+### Player rendering
+
+`Player-Render.js` keeps presentation separate from authoritative state. `Player.render()` delegates to `player.renderer`, which loads a 16×16 directional sprite sheet, animates four walk frames, draws a terrain shadow and fallback marker, and smoothly follows corrected positions and altitude without changing collision coordinates.
+
+```js
+player.renderer.update(deltaSeconds);
+player.render();
+
+await player.loadSprite("./player.png");
+player.renderer.snap(); // use after a deliberate visual teleport
+```
+
+Renderer options under `rendering` include `positionSmoothing`, `altitudeSmoothing`, `animationRate`, `bobStrength`, `shadowColor`, and `renderSize`. Server simulations do not need a renderer tick; browser clients should call `player.update(dt)` or `player.renderer.update(dt)` once per displayed frame.
 
 ### Remote players
 
