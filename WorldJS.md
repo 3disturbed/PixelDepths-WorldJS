@@ -23,13 +23,22 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=center-out-biomes-1";
+  import World from "./World.js?v=generation-pipeline-2";
 
   const canvas = document.querySelector("#world");
+  const [tiles, biomes, generation] = await Promise.all([
+    World.loadTiles("./tiles.json"),
+    World.loadBiomes("./Biomes.json"),
+    World.loadGeneration("./generation.json")
+  ]);
+
   const world = new World(canvas, {
     worldId: "realm-01",
     actorId: crypto.randomUUID(),
     seed: 4182,
+    tiles,
+    biomes,
+    generation,
     width: 16384,
     height: 16384,
     chunkSize: 64,
@@ -80,6 +89,8 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `spawnRadius` | 3.5% of shortest side | Guaranteed central spawn biome |
 | `biomeWarpStrength` | `0.065` | Irregularity applied to circular boundaries |
 | `biomeWarpScale` | world size ÷ 11 | Scale of biome-boundary noise |
+| `generation` | `World.GENERATION` | Terrain, spawn, cave, and resource settings |
+| `generationSetId` | `worldjs-generation-v1` | Multiplayer generation-schema version |
 | `brushRadius` | `7` | Default mining radius |
 | `cameraX`, `cameraY` | world center | Initial camera center |
 | `zoom` | `5` | CSS pixels per terrain cell |
@@ -167,14 +178,16 @@ The class clones and validates the object, so later changes to the source object
 Biome data lives in [Biomes.json](./Biomes.json). There is no separate biome class: `World.js` loads the JSON object and owns biome lookup, spawn placement, radial noise, terrain generation, rendering tints, saves, and multiplayer validation.
 
 ```js
-const [tiles, biomes] = await Promise.all([
+const [tiles, biomes, generation] = await Promise.all([
   World.loadTiles("./tiles.json"),
-  World.loadBiomes("./Biomes.json")
+  World.loadBiomes("./Biomes.json"),
+  World.loadGeneration("./generation.json")
 ]);
 
 const world = new World(canvas, {
   tiles,
   biomes,
+  generation,
   worldId: "realm-01",
   biomeSetId: "realm-biomes-v1"
 });
@@ -210,25 +223,106 @@ Each entry in `Biomes.json` contains:
 | `start`, `end` | Normalized radial range from center to outer corners |
 | `heightBias` | Adds lowlands or raised terrain |
 | `ridgeStrength` | Controls mountain intensity |
-| `caveThreshold` | Controls cave frequency; lower values create more caves |
-| `oreThreshold` | Controls ore frequency; lower values create more ore |
-| `surface`, `shallow` | Keys referencing entries in `tiles.json` |
+| `surface`, `shallow`, `beach` | Keys referencing entries in `tiles.json` |
 | `tint` | RGB multipliers applied during rendering |
 | `danger` | Game-facing progression metadata |
+| `resourceSpawnNodes` | Deterministic resource definitions available in this biome |
+| `caves` | Entrance density and flooding rules for this biome |
 
 The included progression is:
 
 1. Spawn Meadows
 2. Greenwood
 3. Sunken Mire
-4. Stone Highlands
-5. Deepwild
-6. Frostlands
-7. Ember Reach
+4. Frozen Highlands
+5. Ember Reach
 
 Ranges may overlap. At a coordinate, `World.getBiomeAt()` selects the biome whose band center best matches the warped radial distance. Keep the first biome starting at `0`, and ensure the last biome extends beyond `1` so every corner is covered.
 
 `biomeSetId` travels with deltas and chunk snapshots. Multiplayer peers reject incompatible biome generation rules before applying terrain changes.
+
+## Generation settings
+
+[generation.json](./generation.json) is the single customization object for terrain shape and world features:
+
+```js
+const generation = await World.loadGeneration("./generation.json");
+const world = new World(canvas, {
+  generation,
+  generationSetId: "realm-generation-v1"
+});
+```
+
+The terrain pipeline combines:
+
+1. Low-frequency fractal continental noise
+2. Domain warping that bends coastlines and land masses
+3. Higher-frequency terrain detail
+4. Ridge noise multiplied by the active biome
+5. Center-to-edge island falloff
+6. Biome elevation bias
+7. A blended, playable spawn plateau
+
+This produces connected islands, bays, peninsulas, inland hills, mountain ridges, shallow coasts, and an ocean boundary while retaining deterministic chunk generation.
+
+Important `terrain` settings:
+
+| Setting | Effect |
+| --- | --- |
+| `continentScale` | Size of major islands and land masses |
+| `continentOctaves` | Continental fractal detail |
+| `continentPersistence` | Strength retained by successive octaves |
+| `detailScale`, `detailOctaves`, `detailStrength` | Local terrain variation |
+| `domainWarpScale`, `domainWarpStrength` | Coastline distortion |
+| `ridgeScale`, `ridgeThreshold` | Mountain band shape |
+| `elevationAmplitude` | Conversion from noise to altitude layers |
+| `islandFalloffStart`, `islandFalloffStrength` | Outer-ocean boundary |
+| `seaLevel` | Water altitude |
+| `coastWidth` | Reserved coast tuning value |
+| `deepMaterial` | Tile used below biome topsoil |
+
+The `spawn` section controls the safe center plateau. `flatRadius` is perfectly flattened to `altitude`; `blendRadius` eases that plateau into surrounding procedural terrain. Cave fields and resource nodes are suppressed within their configured spawn clearances.
+
+Increase `generationSetId` whenever generation values change for a live multiplayer world. Otherwise two clients could generate different pristine terrain from the same seed.
+
+## Resource spawn nodes
+
+Resource definitions live inside each biome under `resourceSpawnNodes`. Global placement spacing and limits live in `generation.json`.
+
+```js
+const cx = Math.floor(player.x / world.chunkSize);
+const cy = Math.floor(player.y / world.chunkSize);
+const nodes = world.getResourceSpawnNodes(cx, cy);
+```
+
+Each returned node is deterministic:
+
+```js
+{
+  id: "4182:resource:84:19:copper_deposit",
+  type: "copper_deposit",
+  tile: "copper",
+  tileId: 15,
+  x: 8120,
+  y: 1844,
+  altitude: 2,
+  amount: 17,
+  biome: "greenwood"
+}
+```
+
+Persist only depletion or modification state keyed by `id`; pristine nodes regenerate from the seed. Included resources cover all five biomes: stone and flint, copper and tin, iron and bog crystal, silver and mountain crystal, obsidian and ember cores.
+
+## Caves
+
+Subsurface cave voids are generated directly into negative-altitude layers. `generation.caves` controls their noise field and entrance spacing; each biome controls whether entrances exist, their density, and flooding probability.
+
+```js
+const caveEntrances = world.getCavesInChunk(cx, cy);
+const undergroundVoid = world.isCaveAt(x, y, -3);
+```
+
+Entrances return stable IDs, position, surface altitude, radius, depth, biome, and flooding state. Spawn Meadows disables caves. Sunken Mire caves are commonly flooded, while Highlands and Ember Reach caves are usually dry.
 
 ## Camera and rendering
 

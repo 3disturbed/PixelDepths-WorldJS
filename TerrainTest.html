@@ -229,7 +229,7 @@
       <article class="client">
         <div class="client-head">
           <strong class="primary">CLIENT A / LOCAL PLAYER</strong>
-          <span>16,384² CELLS • 64² CHUNKS</span>
+          <span id="biomeLabel">SPAWN MEADOWS</span>
         </div>
         <div class="canvas-wrap">
           <canvas id="primary" aria-label="Interactive destructible terrain"></canvas>
@@ -240,6 +240,8 @@
           <div class="stat"><span>ALTITUDE</span><strong id="altitude">0 / SEA</strong></div>
           <div class="stat"><span>LOADED CHUNKS</span><strong id="chunks">0</strong></div>
           <div class="stat"><span>EXCAVATED</span><strong id="removed">0 px</strong></div>
+          <div class="stat"><span>RESOURCE NODES</span><strong id="resources">0 nearby</strong></div>
+          <div class="stat"><span>CAVE ENTRANCES</span><strong id="caves">0 nearby</strong></div>
         </div>
       </article>
 
@@ -274,13 +276,16 @@
   </main>
 
   <script type="module">
-    import World from "./World.js?v=center-out-biomes-1";
+    import World from "./World.js?v=generation-pipeline-2";
 
     const $ = (selector) => document.querySelector(selector);
     const WORLD_SIZE = 16384;
     const start = WORLD_SIZE / 2;
-    const tiles = await World.loadTiles("./tiles.json");
-    const biomes = await World.loadBiomes("./Biomes.json");
+    const [tiles, biomes, generation] = await Promise.all([
+      World.loadTiles("./tiles.json"),
+      World.loadBiomes("./Biomes.json"),
+      World.loadGeneration("./generation.json")
+    ]);
     let seed = 4182;
     let serverRevision = 0;
     let mining = false;
@@ -296,8 +301,10 @@
       seed,
       tiles,
       biomes,
+      generation,
       tileSetId: "terrain-test-v1",
       biomeSetId: "terrain-biomes-v1",
+      generationSetId: "terrain-generation-v1",
       width: WORLD_SIZE,
       height: WORLD_SIZE,
       cameraX: start,
@@ -313,8 +320,10 @@
       seed,
       tiles,
       biomes,
+      generation,
       tileSetId: "terrain-test-v1",
       biomeSetId: "terrain-biomes-v1",
+      generationSetId: "terrain-generation-v1",
       width: WORLD_SIZE,
       height: WORLD_SIZE,
       cameraX: start,
@@ -345,6 +354,12 @@
       $("#altitude").textContent = `${primary.altitude > 0 ? "+" : ""}${primary.altitude}${primary.altitude === 0 ? " / SEA" : ""}`;
       $("#chunks").textContent = primary.chunks.size.toLocaleString();
       $("#removed").textContent = `${primary.stats.removed.toLocaleString()} px`;
+      const biome = primary.getBiomeAt(primary.camera.x, primary.camera.y);
+      const cx = Math.floor(primary.camera.x / primary.chunkSize);
+      const cy = Math.floor(primary.camera.y / primary.chunkSize);
+      $("#biomeLabel").textContent = `${biome.name.toUpperCase()} • DANGER ${biome.danger}`;
+      $("#resources").textContent = `${primary.getResourceSpawnNodes(cx, cy).length} nearby`;
+      $("#caves").textContent = `${primary.getCavesInChunk(cx, cy).length} nearby`;
       $("#revision").textContent = serverRevision.toLocaleString();
       $("#dirty").textContent = replica.dirtyChunks.size.toLocaleString();
     };
