@@ -33,7 +33,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=tilemap-atlas-4";
+  import World from "./World.js?v=tilegrid-fallback-5";
 
   const canvas = document.querySelector("#world");
   const [tiles, biomes, generation] = await Promise.all([
@@ -106,7 +106,7 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `generationSetId` | `worldjs-generation-v1` | Multiplayer generation-schema version |
 | `brushRadius` | `7` | Default mining radius |
 | `cameraX`, `cameraY` | world center | Initial camera center |
-| `zoom` | `5` | CSS pixels per terrain cell |
+| `zoom` | `generation.rendering.fallbackCellSize` | CSS pixels per terrain cell |
 | `maxChangeLog` | `10000` | Locally retained cell changes |
 | `autoRender` | `true` | Render after public mutations |
 
@@ -228,12 +228,15 @@ Configuration lives in `generation.json`:
 {
   "rendering": {
     "tileSize": 16,
-    "tilemapUrl": "./tilemap.png"
+    "tilemapUrl": "./tilemap.png",
+    "fallbackCellSize": 16
   }
 }
 ```
 
-`tileSize` is validated as exactly `16`. Override only the URL when constructing a world:
+`tileSize` is validated as exactly `16`. `fallbackCellSize` defaults the display zoom to the same 16×16 grid when no atlas image is available. Atlas and fallback cells therefore retain identical world alignment, camera bounds, pointer hit testing, and destruction coordinates.
+
+Override only the URL when constructing a world:
 
 ```js
 const world = new World(canvas, {

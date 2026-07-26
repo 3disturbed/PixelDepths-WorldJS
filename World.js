@@ -18,7 +18,7 @@ export default class World {
     spawn: { radius: 320, flatRadius: 92, blendRadius: 180, altitude: 1, clearCaves: true, clearResourcesRadius: 72 },
     caves: { enabled: true, noiseScale: 54, detailScale: 19, threshold: 0.72, minAltitude: -5, maxAltitude: -1, entranceSpacing: 192, entranceJitter: 0.72, entranceChance: 0.46, minRadius: 5, maxRadius: 13, minDepth: 2, maxDepth: 5 },
     resourceSpawnNodes: { enabled: true, spacing: 96, jitter: 0.76, maxPerChunk: 8, minimumSeparation: 18 },
-    rendering: { tileSize: 16, tilemapUrl: "./tilemap.png" },
+    rendering: { tileSize: 16, tilemapUrl: "./tilemap.png", fallbackCellSize: 16 },
   };
 
   static TILES = {
@@ -186,7 +186,11 @@ export default class World {
     this.worldId = String(options.worldId ?? `world-${this.seed}`);
     this.actorId = String(options.actorId ?? "client");
     this.brushRadius = Number(options.brushRadius ?? 7);
-    this.zoom = Math.max(1, Number(options.zoom ?? 5));
+    this.zoom = Math.max(
+      1,
+      Number(options.zoom ?? options.generation?.rendering?.fallbackCellSize ??
+        World.GENERATION.rendering.fallbackCellSize),
+    );
     this.camera = {
       x: Number(options.cameraX ?? this.width / 2),
       y: Number(options.cameraY ?? this.height / 2),
@@ -373,6 +377,10 @@ export default class World {
       throw new RangeError("generation.rendering.tileSize must be 16.");
     }
     generation.rendering.tilemapUrl = String(generation.rendering.tilemapUrl ?? "./tilemap.png");
+    generation.rendering.fallbackCellSize = Math.max(
+      1,
+      Number(generation.rendering.fallbackCellSize ?? 16),
+    );
     return generation;
   }
 

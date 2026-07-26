@@ -276,7 +276,7 @@
   </main>
 
   <script type="module">
-    import World from "./World.js?v=tilemap-atlas-4";
+    import World from "./World.js?v=tilegrid-fallback-5";
 
     const $ = (selector) => document.querySelector(selector);
     const WORLD_SIZE = 16384;
@@ -309,7 +309,7 @@
       height: WORLD_SIZE,
       cameraX: start,
       cameraY: start,
-      zoom: 7,
+      zoom: generation.rendering.fallbackCellSize,
       maxLoadedChunks: 256,
       autoRender: false
     });
@@ -328,7 +328,7 @@
       height: WORLD_SIZE,
       cameraX: start,
       cameraY: start,
-      zoom: 4,
+      zoom: generation.rendering.fallbackCellSize,
       maxLoadedChunks: 256,
       autoRender: false
     });
