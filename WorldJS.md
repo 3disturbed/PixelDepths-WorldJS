@@ -2,6 +2,8 @@
 
 `World.js` is a browser-native ES6 class for large, layered, destructible top-down RPG terrain. It uses deterministic procedural generation, lazy chunks, viewport-only Canvas rendering, and JSON-safe change packets suitable for authoritative multiplayer.
 
+It targets modern evergreen browsers with ES2022 class-field and private-method support. The canvas check is realm-safe, so canvases supplied by an iframe document are supported.
+
 ## Why it scales
 
 The default world is `16,384 × 16,384 × 11` altitude layers, but it is never allocated as one giant array. Terrain is generated in `64 × 64` chunks only when gameplay or rendering touches it.

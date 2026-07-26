@@ -15,7 +15,8 @@ export default class World {
   static PROTOCOL = 1;
 
   constructor(canvas, options = {}) {
-    if (!(canvas instanceof HTMLCanvasElement)) {
+    if (!canvas || typeof canvas.getContext !== "function" ||
+        typeof canvas.getBoundingClientRect !== "function") {
       throw new TypeError("World requires an HTMLCanvasElement.");
     }
 
@@ -69,7 +70,7 @@ export default class World {
     };
     this.materialNames = ["air", "water", "sand", "grass", "soil", "stone", "ore", "crystal"];
 
-    this.buffer = document.createElement("canvas");
+    this.buffer = (canvas.ownerDocument ?? document).createElement("canvas");
     this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
     this.resize();
   }
@@ -202,7 +203,11 @@ export default class World {
     this.dirtyChunks.add(this.#chunkKey(location.cx, location.cy, z));
     if (options.record !== false) {
       const change = { x: location.ix, y: location.iy, z, material: value };
-      (options.collector ?? this.outgoingChanges).push(change);
+      if (options.collector) options.collector.push(change);
+      else {
+        this.#commitLocalChanges([change], options.operationId);
+        if (this.autoRender && options.render !== false) this.render();
+      }
     }
     return true;
   }
@@ -251,6 +256,7 @@ export default class World {
     this.revision++;
     const opId = String(operationId ?? `${this.actorId}:${++this.operationSequence}`);
     const stamped = changes.map((change) => ({ ...change, revision: this.revision, operationId: opId }));
+    this.seenOperations.add(opId);
     this.outgoingChanges.push(...stamped);
     this.changeLog.push(...stamped);
     if (this.changeLog.length > this.maxChangeLog) {
@@ -291,6 +297,7 @@ export default class World {
 
     let applied = 0;
     const accepted = [];
+    const acceptedOperations = new Set();
     for (const change of packet.changes ?? []) {
       const operationId = change.operationId == null ? null : String(change.operationId);
       if (operationId && this.seenOperations.has(operationId)) continue;
@@ -298,9 +305,10 @@ export default class World {
         applied++;
         accepted.push(change);
       }
-      if (operationId) this.seenOperations.add(operationId);
+      if (operationId) acceptedOperations.add(operationId);
     }
 
+    for (const operationId of acceptedOperations) this.seenOperations.add(operationId);
     this.remoteRevision = Math.max(this.remoteRevision, incomingRevision);
     this.#trimSeenOperations();
     if (accepted.length) this.emit("change", { source: "remote", revision: incomingRevision, changes: accepted });
