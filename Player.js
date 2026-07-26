@@ -72,13 +72,14 @@ export default class Player {
     this.plugins = new Map();
     this.installingPlugins = new Set();
 
+    const rendering = options.rendering ?? {};
     this.renderer = new PlayerRender(this, {
-      ...options.rendering,
-      sprite: options.sprite,
-      spriteUrl: options.spriteUrl,
-      renderSize: options.renderSize,
-      fallbackColor: options.fallbackColor,
-      animationRate: options.animationRate,
+      ...rendering,
+      sprite: options.sprite ?? rendering.sprite,
+      spriteUrl: options.spriteUrl ?? rendering.spriteUrl,
+      renderSize: options.renderSize ?? rendering.renderSize,
+      fallbackColor: options.fallbackColor ?? rendering.fallbackColor,
+      animationRate: options.animationRate ?? rendering.animationRate,
     });
     this.spriteReady = this.renderer.ready;
     for (const entry of options.plugins ?? []) {
