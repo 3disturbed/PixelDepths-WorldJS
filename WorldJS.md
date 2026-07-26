@@ -33,7 +33,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=generation-pipeline-3";
+  import World from "./World.js?v=tilemap-atlas-4";
 
   const canvas = document.querySelector("#world");
   const [tiles, biomes, generation] = await Promise.all([
@@ -185,6 +185,82 @@ const world = new World(canvas, {
 The class clones and validates the object, so later changes to the source object do not silently mutate a running world. IDs must be unique. The eight base generator keys—`air`, `water`, `sand`, `grass`, `soil`, `stone`, `ore`, and `crystal`—must remain present with IDs `0–7`. Biome surface and resource keys must also resolve to valid tiles. Additional definitions may use any unused ID through `255`.
 
 `tileSetId` is included in change packets, chunk snapshots, and saves. Multiplayer peers reject data from a different tile schema. Increase it whenever tile IDs or their gameplay meaning changes.
+
+## 16×16 tilemap atlas
+
+`World.js` automatically attempts to load `tilemap.png`. Every atlas cell is exactly `16 × 16` source pixels.
+
+The source lookup is:
+
+```js
+const sourceX = 16 * TileID;
+const sourceY = 16 * BiomeID;
+```
+
+In atlas form:
+
+```text
+                         TileID →
+BiomeID 0    [0,0] [1,0] [2,0] [3,0] ...
+BiomeID 1    [0,1] [1,1] [2,1] [3,1] ...
+BiomeID 2    [0,2] [1,2] [2,2] [3,2] ...
+BiomeID 3    [0,3] [1,3] [2,3] [3,3] ...
+BiomeID 4    [0,4] [1,4] [2,4] [3,4] ...
+```
+
+For example, Tile ID `15` in Biome ID `3` uses:
+
+```js
+sourceX = 16 * 15; // 240
+sourceY = 16 * 3;  // 48
+```
+
+With the supplied 21 tile IDs (`0–20`) and five biome IDs (`0–4`), a complete atlas is:
+
+```text
+width  = 21 * 16 = 336 pixels
+height =  5 * 16 =  80 pixels
+```
+
+Configuration lives in `generation.json`:
+
+```json
+{
+  "rendering": {
+    "tileSize": 16,
+    "tilemapUrl": "./tilemap.png"
+  }
+}
+```
+
+`tileSize` is validated as exactly `16`. Override only the URL when constructing a world:
+
+```js
+const world = new World(canvas, {
+  tiles,
+  biomes,
+  generation,
+  tilemapUrl: "/art/world-tilemap.png"
+});
+
+await world.tilemapReady;
+```
+
+You can also load or replace an atlas later:
+
+```js
+await world.loadTilemap("./tilemap.png");
+world.setTilemap(existingImageElement);
+```
+
+If `tilemap.png` fails to load, rendering continues with the biome-tinted solid color from `tiles.json`. If an individual atlas coordinate falls outside the image bounds, only that cell uses the solid-color fallback. An excavated air cell renders the lower altitude’s atlas tile with a dark overlay.
+
+Tilemap events:
+
+| Event | Meaning |
+| --- | --- |
+| `tilemapload` | Atlas loaded and passed basic dimension checks |
+| `tilemaperror` | Image loading failed or the supplied image was invalid |
 
 ## Center-out biomes
 

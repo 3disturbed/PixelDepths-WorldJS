@@ -48,5 +48,9 @@
     "jitter": 0.76,
     "maxPerChunk": 8,
     "minimumSeparation": 18
+  },
+  "rendering": {
+    "tileSize": 16,
+    "tilemapUrl": "./tilemap.png"
   }
 }

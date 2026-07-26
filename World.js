@@ -18,6 +18,7 @@ export default class World {
     spawn: { radius: 320, flatRadius: 92, blendRadius: 180, altitude: 1, clearCaves: true, clearResourcesRadius: 72 },
     caves: { enabled: true, noiseScale: 54, detailScale: 19, threshold: 0.72, minAltitude: -5, maxAltitude: -1, entranceSpacing: 192, entranceJitter: 0.72, entranceChance: 0.46, minRadius: 5, maxRadius: 13, minDepth: 2, maxDepth: 5 },
     resourceSpawnNodes: { enabled: true, spacing: 96, jitter: 0.76, maxPerChunk: 8, minimumSeparation: 18 },
+    rendering: { tileSize: 16, tilemapUrl: "./tilemap.png" },
   };
 
   static TILES = {
@@ -231,9 +232,18 @@ export default class World {
     this.palette = Object.fromEntries([...this.tileById].map(([id, tile]) => [id, tile.color]));
     this.materialNames = [];
     for (const [id, tile] of this.tileById) this.materialNames[id] = tile.key;
+    this.tileSize = 16;
+    this.tilemap = null;
+    this.tilemapUrl = options.tilemapUrl ?? this.generation.rendering.tilemapUrl;
+    this.tilemapReady = Promise.resolve(null);
 
     this.buffer = (canvas.ownerDocument ?? document).createElement("canvas");
     this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
+    if (options.tilemap && typeof options.tilemap === "object") {
+      this.setTilemap(options.tilemap);
+    } else if (options.tilemap !== false && this.tilemapUrl && typeof globalThis.Image === "function") {
+      this.tilemapReady = this.loadTilemap(this.tilemapUrl);
+    }
     this.resize();
   }
 
@@ -341,8 +351,9 @@ export default class World {
         ...World.GENERATION.resourceSpawnNodes,
         ...input.resourceSpawnNodes,
       },
+      rendering: { ...World.GENERATION.rendering, ...input.rendering },
     };
-    for (const section of ["terrain", "spawn", "caves", "resourceSpawnNodes"]) {
+    for (const section of ["terrain", "spawn", "caves", "resourceSpawnNodes", "rendering"]) {
       if (!generation[section] || typeof generation[section] !== "object") {
         throw new Error(`generation.${section} is required.`);
       }
@@ -358,6 +369,10 @@ export default class World {
     generation.spawn.altitude = this.#clampAltitude(generation.spawn.altitude ?? 1);
     generation.caves.enabled = Boolean(generation.caves.enabled);
     generation.resourceSpawnNodes.enabled = Boolean(generation.resourceSpawnNodes.enabled);
+    if (Number(generation.rendering.tileSize) !== 16) {
+      throw new RangeError("generation.rendering.tileSize must be 16.");
+    }
+    generation.rendering.tilemapUrl = String(generation.rendering.tilemapUrl ?? "./tilemap.png");
     return generation;
   }
 
@@ -941,6 +956,42 @@ export default class World {
     this.setCamera(this.camera.x + Number(dx), this.camera.y + Number(dy));
   }
 
+  setTilemap(image) {
+    const width = Number(image?.naturalWidth ?? image?.width ?? 0);
+    const height = Number(image?.naturalHeight ?? image?.height ?? 0);
+    if (!image || typeof image !== "object" || width < 16 || height < 16) {
+      this.tilemap = null;
+      this.emit("tilemaperror", { url: this.tilemapUrl, reason: "invalid-image" });
+      if (this.autoRender) this.render();
+      return false;
+    }
+    this.tilemap = image;
+    this.emit("tilemapload", { url: this.tilemapUrl, width, height, tileSize: 16 });
+    if (this.autoRender) this.render();
+    return true;
+  }
+
+  loadTilemap(url = this.tilemapUrl, options = {}) {
+    this.tilemapUrl = String(url);
+    if (typeof globalThis.Image !== "function") return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const image = new Image();
+      if (options.crossOrigin != null) image.crossOrigin = options.crossOrigin;
+      image.decoding = "async";
+      image.onload = () => {
+        this.setTilemap(image);
+        resolve(image);
+      };
+      image.onerror = () => {
+        this.tilemap = null;
+        this.emit("tilemaperror", { url: this.tilemapUrl, reason: "load-failed" });
+        if (this.autoRender) this.render();
+        resolve(null);
+      };
+      image.src = this.tilemapUrl;
+    });
+  }
+
   getViewport() {
     const rect = this.canvas.getBoundingClientRect();
     const cellsWide = Math.max(1, Math.ceil(rect.width / this.zoom));
@@ -970,6 +1021,9 @@ export default class World {
 
   render() {
     const viewport = this.getViewport();
+    if (this.tilemap) {
+      this.#renderTilemap(viewport);
+    } else {
     if (this.buffer.width !== viewport.width || this.buffer.height !== viewport.height) {
       this.buffer.width = viewport.width;
       this.buffer.height = viewport.height;
@@ -1006,6 +1060,7 @@ export default class World {
     this.bufferCtx.putImageData(image, 0, 0);
     this.ctx.imageSmoothingEnabled = false;
     this.ctx.drawImage(this.buffer, 0, 0, this.canvas.width, this.canvas.height);
+    }
 
     if (this.pointer.active) {
       const sx = this.canvas.width / viewport.width;
@@ -1024,6 +1079,64 @@ export default class World {
       );
       this.ctx.stroke();
       this.ctx.restore();
+    }
+  }
+
+  #renderTilemap(viewport) {
+    const tileSize = 16;
+    const atlasWidth = Number(this.tilemap.naturalWidth ?? this.tilemap.width ?? 0);
+    const atlasHeight = Number(this.tilemap.naturalHeight ?? this.tilemap.height ?? 0);
+    const destinationWidth = this.canvas.width / viewport.width;
+    const destinationHeight = this.canvas.height / viewport.height;
+    this.ctx.imageSmoothingEnabled = false;
+    this.ctx.fillStyle = "#091015";
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    for (let sy = 0; sy < viewport.height; sy++) {
+      for (let sx = 0; sx < viewport.width; sx++) {
+        const x = viewport.x + sx;
+        const y = viewport.y + sy;
+        const biome = this.getBiomeAt(x, y);
+        let material = this.materialAt(x, y, this.altitude);
+        let dim = false;
+        if (material === World.AIR && this.altitude > this.minAltitude) {
+          material = this.materialAt(x, y, this.altitude - 1);
+          dim = true;
+        }
+        const tile = this.tileById.get(material);
+        const sourceX = 16 * tile.id;
+        const sourceY = 16 * biome.id;
+        const destinationX = sx * destinationWidth;
+        const destinationY = sy * destinationHeight;
+        const sourceExists = sourceX + tileSize <= atlasWidth && sourceY + tileSize <= atlasHeight;
+
+        if (sourceExists) {
+          this.ctx.drawImage(
+            this.tilemap,
+            sourceX,
+            sourceY,
+            tileSize,
+            tileSize,
+            destinationX,
+            destinationY,
+            destinationWidth + 0.5,
+            destinationHeight + 0.5,
+          );
+          if (dim) {
+            this.ctx.fillStyle = "rgba(3, 8, 10, 0.54)";
+            this.ctx.fillRect(destinationX, destinationY, destinationWidth + 0.5, destinationHeight + 0.5);
+          }
+        } else {
+          const base = this.palette[material] ?? this.palette[World.AIR];
+          const shade = dim ? 0.46 : 1;
+          const grain = tile?.solid ? (this.hash(x, y, this.altitude) * 17 | 0) - 8 : 0;
+          const red = this.#clamp(base[0] * biome.tint[0] * shade + grain, 0, 255) | 0;
+          const green = this.#clamp(base[1] * biome.tint[1] * shade + grain, 0, 255) | 0;
+          const blue = this.#clamp(base[2] * biome.tint[2] * shade + grain, 0, 255) | 0;
+          this.ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+          this.ctx.fillRect(destinationX, destinationY, destinationWidth + 0.5, destinationHeight + 0.5);
+        }
+      }
     }
   }
 
