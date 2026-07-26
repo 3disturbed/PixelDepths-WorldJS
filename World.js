@@ -1067,10 +1067,10 @@ export default class World {
 
   getViewport() {
     const rect = this.canvas.getBoundingClientRect();
-    const cellsWide = Math.max(1, Math.ceil(rect.width / this.zoom));
-    const cellsHigh = Math.max(1, Math.ceil(rect.height / this.zoom));
-    const x = this.#clamp(Math.floor(this.camera.x - cellsWide / 2), 0, Math.max(0, this.width - cellsWide));
-    const y = this.#clamp(Math.floor(this.camera.y - cellsHigh / 2), 0, Math.max(0, this.height - cellsHigh));
+    const cellsWide = Math.max(1, rect.width / this.zoom);
+    const cellsHigh = Math.max(1, rect.height / this.zoom);
+    const x = this.#clamp(this.camera.x - cellsWide / 2, 0, Math.max(0, this.width - cellsWide));
+    const y = this.#clamp(this.camera.y - cellsHigh / 2, 0, Math.max(0, this.height - cellsHigh));
     return { x, y, width: Math.min(cellsWide, this.width), height: Math.min(cellsHigh, this.height) };
   }
 
@@ -1097,17 +1097,23 @@ export default class World {
     if (this.tilemap) {
       this.#renderTilemap(viewport);
     } else {
-    if (this.buffer.width !== viewport.width || this.buffer.height !== viewport.height) {
-      this.buffer.width = viewport.width;
-      this.buffer.height = viewport.height;
+    const startX = Math.floor(viewport.x);
+    const startY = Math.floor(viewport.y);
+    const endX = Math.ceil(viewport.x + viewport.width);
+    const endY = Math.ceil(viewport.y + viewport.height);
+    const sampleWidth = endX - startX;
+    const sampleHeight = endY - startY;
+    if (this.buffer.width !== sampleWidth || this.buffer.height !== sampleHeight) {
+      this.buffer.width = sampleWidth;
+      this.buffer.height = sampleHeight;
     }
-    const image = this.bufferCtx.createImageData(viewport.width, viewport.height);
+    const image = this.bufferCtx.createImageData(sampleWidth, sampleHeight);
     const data = image.data;
 
-    for (let sy = 0; sy < viewport.height; sy++) {
-      for (let sx = 0; sx < viewport.width; sx++) {
-        const x = viewport.x + sx;
-        const y = viewport.y + sy;
+    for (let sy = 0; sy < sampleHeight; sy++) {
+      for (let sx = 0; sx < sampleWidth; sx++) {
+        const x = startX + sx;
+        const y = startY + sy;
         const material = this.materialAt(x, y, this.altitude);
         let color = this.palette[material];
         if (material === World.AIR && this.altitude > this.minAltitude) {
@@ -1122,7 +1128,7 @@ export default class World {
           color[2] * biome.tint[2],
         ];
         const grain = tile?.solid ? (this.hash(x, y, this.altitude) * 17 | 0) - 8 : 0;
-        const i = (sy * viewport.width + sx) * 4;
+        const i = (sy * sampleWidth + sx) * 4;
         data[i] = this.#clamp(color[0] + grain, 0, 255);
         data[i + 1] = this.#clamp(color[1] + grain, 0, 255);
         data[i + 2] = this.#clamp(color[2] + grain, 0, 255);
@@ -1132,7 +1138,15 @@ export default class World {
 
     this.bufferCtx.putImageData(image, 0, 0);
     this.ctx.imageSmoothingEnabled = false;
-    this.ctx.drawImage(this.buffer, 0, 0, this.canvas.width, this.canvas.height);
+    const destinationWidth = this.canvas.width / viewport.width;
+    const destinationHeight = this.canvas.height / viewport.height;
+    this.ctx.drawImage(
+      this.buffer,
+      (startX - viewport.x) * destinationWidth,
+      (startY - viewport.y) * destinationHeight,
+      sampleWidth * destinationWidth,
+      sampleHeight * destinationHeight,
+    );
     }
 
     this.renderPlayers(this.ctx);
@@ -1167,10 +1181,12 @@ export default class World {
     this.ctx.fillStyle = "#091015";
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    for (let sy = 0; sy < viewport.height; sy++) {
-      for (let sx = 0; sx < viewport.width; sx++) {
-        const x = viewport.x + sx;
-        const y = viewport.y + sy;
+    const startX = Math.floor(viewport.x);
+    const startY = Math.floor(viewport.y);
+    const endX = Math.ceil(viewport.x + viewport.width);
+    const endY = Math.ceil(viewport.y + viewport.height);
+    for (let y = startY; y < endY; y++) {
+      for (let x = startX; x < endX; x++) {
         const biome = this.getBiomeAt(x, y);
         let material = this.materialAt(x, y, this.altitude);
         let dim = false;
@@ -1181,8 +1197,8 @@ export default class World {
         const tile = this.tileById.get(material);
         const sourceX = 16 * tile.id;
         const sourceY = 16 * biome.id;
-        const destinationX = sx * destinationWidth;
-        const destinationY = sy * destinationHeight;
+        const destinationX = (x - viewport.x) * destinationWidth;
+        const destinationY = (y - viewport.y) * destinationHeight;
         const sourceExists = sourceX + tileSize <= atlasWidth && sourceY + tileSize <= atlasHeight;
 
         if (sourceExists) {
