@@ -14,7 +14,7 @@ export default class World {
 
   static GENERATION = {
     version: 1,
-    terrain: { seaLevel: 0, continentScale: 1150, continentOctaves: 4, continentPersistence: 0.52, detailScale: 180, detailOctaves: 3, detailStrength: 0.24, domainWarpScale: 760, domainWarpStrength: 210, ridgeScale: 260, ridgeThreshold: 0.56, elevationAmplitude: 7.2, islandFalloffStart: 0.7, islandFalloffStrength: 1.35, coastWidth: 0.12, deepMaterial: "stone" },
+    terrain: { seaLevel: 0, continentScale: 1150, continentOctaves: 4, continentPersistence: 0.52, detailScale: 180, detailOctaves: 3, detailStrength: 0.24, domainWarpScale: 760, domainWarpStrength: 210, ridgeScale: 260, ridgeThreshold: 0.56, elevationAmplitude: 7.2, landBias: 0.5, islandFalloffStart: 0.82, islandFalloffStrength: 0.9, coastWidth: 0.12, deepMaterial: "stone" },
     spawn: { radius: 320, flatRadius: 92, blendRadius: 180, altitude: 1, clearCaves: true, clearResourcesRadius: 72 },
     caves: { enabled: true, noiseScale: 54, detailScale: 19, threshold: 0.72, minAltitude: -5, maxAltitude: -1, entranceSpacing: 192, entranceJitter: 0.72, entranceChance: 0.46, minRadius: 5, maxRadius: 13, minDepth: 2, maxDepth: 5 },
     resourceSpawnNodes: { enabled: true, spacing: 96, jitter: 0.76, maxPerChunk: 8, minimumSeparation: 18 },
@@ -502,7 +502,8 @@ export default class World {
       (detail - 0.5) * terrain.detailStrength +
       ridge +
       biome.heightBias -
-      edgeFalloff;
+      edgeFalloff +
+      terrain.landBias;
     let altitude = Math.round(terrain.seaLevel + heightValue * terrain.elevationAmplitude);
 
     const spawnDistance = Math.hypot(x - this.biomeCenter.x, y - this.biomeCenter.y);

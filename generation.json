@@ -13,8 +13,9 @@
     "ridgeScale": 260,
     "ridgeThreshold": 0.56,
     "elevationAmplitude": 7.2,
-    "islandFalloffStart": 0.7,
-    "islandFalloffStrength": 1.35,
+    "landBias": 0.5,
+    "islandFalloffStart": 0.82,
+    "islandFalloffStrength": 0.9,
     "coastWidth": 0.12,
     "deepMaterial": "stone"
   },

@@ -23,7 +23,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=generation-pipeline-2";
+  import World from "./World.js?v=generation-pipeline-3";
 
   const canvas = document.querySelector("#world");
   const [tiles, biomes, generation] = await Promise.all([
@@ -276,6 +276,7 @@ Important `terrain` settings:
 | `domainWarpScale`, `domainWarpStrength` | Coastline distortion |
 | `ridgeScale`, `ridgeThreshold` | Mountain band shape |
 | `elevationAmplitude` | Conversion from noise to altitude layers |
+| `landBias` | Global lift applied before altitude conversion |
 | `islandFalloffStart`, `islandFalloffStrength` | Outer-ocean boundary |
 | `seaLevel` | Water altitude |
 | `coastWidth` | Reserved coast tuning value |
