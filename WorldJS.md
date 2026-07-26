@@ -4,6 +4,16 @@
 
 It targets modern evergreen browsers with ES2022 class-field and private-method support. The canvas check is realm-safe, so canvases supplied by an iframe document are supported.
 
+## Project files
+
+| File | Responsibility |
+| --- | --- |
+| `World.js` | Generation, chunks, rendering, destruction, saves, and multiplayer deltas |
+| `tiles.json` | Pixel materials and resource materials |
+| `Biomes.json` | The five radial biomes and biome-specific content |
+| `generation.json` | Terrain shape, sea level, spawn, caves, and resource placement |
+| `TerrainTest.html` | Interactive two-client test harness |
+
 ## Why it scales
 
 The default world is `16,384 × 16,384 × 11` altitude layers, but it is never allocated as one giant array. Terrain is generated in `64 × 64` chunks only when gameplay or rendering touches it.
@@ -39,6 +49,9 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
     tiles,
     biomes,
     generation,
+    tileSetId: "realm-tiles-v1",
+    biomeSetId: "realm-biomes-v1",
+    generationSetId: "realm-generation-v1",
     width: 16384,
     height: 16384,
     chunkSize: 64,
@@ -86,7 +99,7 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `biomes` | `World.BIOMES` | Center-out biome definitions from `Biomes.json` |
 | `biomeSetId` | `worldjs-center-out-v1` | Multiplayer biome-schema version |
 | `biomeCenterX`, `biomeCenterY` | world center | Spawn and radial-biome origin |
-| `spawnRadius` | 3.5% of shortest side | Guaranteed central spawn biome |
+| `spawnRadius` | `generation.spawn.radius` | Guaranteed central spawn biome |
 | `biomeWarpStrength` | `0.065` | Irregularity applied to circular boundaries |
 | `biomeWarpScale` | world size ÷ 11 | Scale of biome-boundary noise |
 | `generation` | `World.GENERATION` | Terrain, spawn, cave, and resource settings |
@@ -169,7 +182,7 @@ const world = new World(canvas, {
 });
 ```
 
-The class clones and validates the object, so later changes to the source object do not silently mutate a running world. IDs must be unique. The eight generator keys—`air`, `water`, `sand`, `grass`, `soil`, `stone`, `ore`, and `crystal`—must remain present with IDs `0–7`. Additional tile definitions may use any unused ID through `255`.
+The class clones and validates the object, so later changes to the source object do not silently mutate a running world. IDs must be unique. The eight base generator keys—`air`, `water`, `sand`, `grass`, `soil`, `stone`, `ore`, and `crystal`—must remain present with IDs `0–7`. Biome surface and resource keys must also resolve to valid tiles. Additional definitions may use any unused ID through `255`.
 
 `tileSetId` is included in change packets, chunk snapshots, and saves. Multiplayer peers reject data from a different tile schema. Increase it whenever tile IDs or their gameplay meaning changes.
 
@@ -263,7 +276,7 @@ The terrain pipeline combines:
 6. Biome elevation bias
 7. A blended, playable spawn plateau
 
-This produces connected islands, bays, peninsulas, inland hills, mountain ridges, shallow coasts, and an ocean boundary while retaining deterministic chunk generation.
+This produces connected islands, bays, peninsulas, inland hills, mountain ridges, shallow coasts, and an ocean boundary while retaining deterministic chunk generation. Altitudes above `seaLevel` are dry land; altitude `seaLevel` is the shoreline band; lower exposed cells are water.
 
 Important `terrain` settings:
 
@@ -283,6 +296,29 @@ Important `terrain` settings:
 | `deepMaterial` | Tile used below biome topsoil |
 
 The `spawn` section controls the safe center plateau. `flatRadius` is perfectly flattened to `altitude`; `blendRadius` eases that plateau into surrounding procedural terrain. Cave fields and resource nodes are suppressed within their configured spawn clearances.
+
+### Sea-level calibration
+
+The supplied settings use:
+
+```json
+{
+  "seaLevel": 0,
+  "landBias": 0.5,
+  "islandFalloffStart": 0.82,
+  "islandFalloffStrength": 0.9
+}
+```
+
+`landBias` is the primary dry-land control:
+
+- Increase it when too much terrain is submerged.
+- Decrease it when the world lacks oceans and channels.
+- Raise `islandFalloffStart` to move the outer ocean closer to the map edge.
+- Raise `islandFalloffStrength` to make the edge become deep ocean more quickly.
+- Use biome `heightBias` for regional tuning rather than changing the global sea level.
+
+The supplied calibration makes Meadows and Greenwood predominantly dry, Mire intentionally wet but traversable, Highlands mountainous, and Ember Reach a mixture of outer islands and ocean. After changing generation values, regenerate with the same seed and inspect several regions rather than judging only the spawn chunk.
 
 Increase `generationSetId` whenever generation values change for a live multiplayer world. Otherwise two clients could generate different pristine terrain from the same seed.
 
@@ -307,6 +343,7 @@ Each returned node is deterministic:
   x: 8120,
   y: 1844,
   altitude: 2,
+  surfaceAltitude: 3,
   amount: 17,
   biome: "greenwood"
 }
@@ -421,6 +458,9 @@ socket.addEventListener("message", ({ data }) => {
   protocol: 1,
   worldId: "realm-01",
   seed: 4182,
+  tileSetId: "realm-tiles-v1",
+  biomeSetId: "realm-biomes-v1",
+  generationSetId: "realm-generation-v1",
   actorId: "peer-123",
   revision: 17,
   changes: [
@@ -440,6 +480,9 @@ For strict gap detection, the server should broadcast:
   protocol: 1,
   worldId: "realm-01",
   seed: 4182,
+  tileSetId: "realm-tiles-v1",
+  biomeSetId: "realm-biomes-v1",
+  generationSetId: "realm-generation-v1",
   baseRevision: 1041,
   revision: 1042,
   changes: [
@@ -450,7 +493,7 @@ For strict gap detection, the server should broadcast:
 
 `applyChanges()`:
 
-- rejects another protocol, seed, or world ID;
+- rejects another protocol, seed, world ID, tile set, biome set, or generation set;
 - ignores packets older than the applied remote revision;
 - detects `baseRevision` gaps by default;
 - de-duplicates operation IDs;
@@ -555,7 +598,7 @@ For large sessions, persist each dirty chunk separately in IndexedDB or server s
 
 An authoritative server should validate:
 
-- `worldId`, seed, protocol, and expected revision;
+- `worldId`, seed, protocol, all three schema IDs, and expected revision;
 - integer coordinates, altitude, material IDs, and world bounds;
 - maximum blast radius and changes per operation;
 - player range, tools, cooldowns, and permissions;
