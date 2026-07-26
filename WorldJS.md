@@ -56,6 +56,8 @@ python3 -m http.server 3000
 
 Then open `http://localhost:3000`.
 
+Open `TerrainTest.html` for the included interactive test harness. It provides mining, altitude controls, camera movement, zoom, live chunk statistics, and two simulated clients connected through an ordered authoritative change stream.
+
 ## Constructor options
 
 | Option | Default | Meaning |

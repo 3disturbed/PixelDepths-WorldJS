@@ -4,6 +4,81 @@
  * Native ES6, HTML5 Canvas, no dependencies.
  */
 export default class World {
+  static TILES = {
+    air: {
+      id: 0,
+      name: "Air",
+      color: [9, 15, 21],
+      solid: false,
+      mineable: false,
+      liquid: false,
+      hardness: 0,
+    },
+    water: {
+      id: 1,
+      name: "Water",
+      color: [26, 111, 145],
+      solid: false,
+      mineable: false,
+      liquid: true,
+      hardness: 0,
+    },
+    sand: {
+      id: 2,
+      name: "Sand",
+      color: [216, 174, 91],
+      solid: true,
+      mineable: true,
+      liquid: false,
+      hardness: 1,
+    },
+    grass: {
+      id: 3,
+      name: "Grass",
+      color: [74, 126, 71],
+      solid: true,
+      mineable: true,
+      liquid: false,
+      hardness: 1,
+    },
+    soil: {
+      id: 4,
+      name: "Soil",
+      color: [112, 72, 48],
+      solid: true,
+      mineable: true,
+      liquid: false,
+      hardness: 2,
+    },
+    stone: {
+      id: 5,
+      name: "Stone",
+      color: [91, 99, 101],
+      solid: true,
+      mineable: true,
+      liquid: false,
+      hardness: 4,
+    },
+    ore: {
+      id: 6,
+      name: "Ore",
+      color: [190, 112, 47],
+      solid: true,
+      mineable: true,
+      liquid: false,
+      hardness: 6,
+    },
+    crystal: {
+      id: 7,
+      name: "Crystal",
+      color: [86, 207, 190],
+      solid: true,
+      mineable: true,
+      liquid: false,
+      hardness: 8,
+    },
+  };
+
   static AIR = 0;
   static WATER = 1;
   static SAND = 2;
@@ -58,17 +133,11 @@ export default class World {
     this.pointer = { x: 0, y: 0, active: false };
     this.stats = { removed: 0, lastMaterial: "—", loadedChunks: 0 };
 
-    this.palette = {
-      [World.AIR]: [9, 15, 21],
-      [World.WATER]: [26, 111, 145],
-      [World.SAND]: [216, 174, 91],
-      [World.GRASS]: [74, 126, 71],
-      [World.SOIL]: [112, 72, 48],
-      [World.STONE]: [91, 99, 101],
-      [World.ORE]: [190, 112, 47],
-      [World.CRYSTAL]: [86, 207, 190],
-    };
-    this.materialNames = ["air", "water", "sand", "grass", "soil", "stone", "ore", "crystal"];
+    this.tiles = this.#prepareTiles(options.tiles ?? World.TILES);
+    this.tileById = new Map(Object.entries(this.tiles).map(([key, tile]) => [tile.id, { key, ...tile }]));
+    this.palette = Object.fromEntries([...this.tileById].map(([id, tile]) => [id, tile.color]));
+    this.materialNames = [];
+    for (const [id, tile] of this.tileById) this.materialNames[id] = tile.key;
 
     this.buffer = (canvas.ownerDocument ?? document).createElement("canvas");
     this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
@@ -79,6 +148,39 @@ export default class World {
     const number = Math.trunc(Number(value));
     if (!Number.isSafeInteger(number) || number <= 0) throw new RangeError(`${name} must be a positive safe integer.`);
     return number;
+  }
+
+  #prepareTiles(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new TypeError("tiles must be a JSON object keyed by tile name.");
+    }
+    const tiles = JSON.parse(JSON.stringify(source));
+    const ids = new Set();
+    for (const [key, tile] of Object.entries(tiles)) {
+      if (!tile || typeof tile !== "object" || Array.isArray(tile)) {
+        throw new TypeError(`Tile "${key}" must be an object.`);
+      }
+      if (!Number.isInteger(tile.id) || tile.id < 0 || tile.id > 255 || ids.has(tile.id)) {
+        throw new RangeError(`Tile "${key}" requires a unique integer id from 0 to 255.`);
+      }
+      if (!Array.isArray(tile.color) || tile.color.length !== 3 ||
+          tile.color.some((channel) => !Number.isInteger(channel) || channel < 0 || channel > 255)) {
+        throw new RangeError(`Tile "${key}" requires an RGB color array.`);
+      }
+      tile.name = String(tile.name ?? key);
+      tile.solid = Boolean(tile.solid);
+      tile.mineable = Boolean(tile.mineable);
+      tile.liquid = Boolean(tile.liquid);
+      tile.hardness = Math.max(0, Number(tile.hardness ?? 0));
+      ids.add(tile.id);
+    }
+    for (const required of ["air", "water", "sand", "grass", "soil", "stone", "ore", "crystal"]) {
+      if (!tiles[required]) throw new Error(`Missing generator tile: "${required}".`);
+      if (tiles[required].id !== World.TILES[required].id) {
+        throw new Error(`Generator tile "${required}" must use id ${World.TILES[required].id}.`);
+      }
+    }
+    return tiles;
   }
 
   #clamp(value, min, max) {
@@ -194,7 +296,7 @@ export default class World {
     if (!this.#inBounds(x, y)) return false;
     const z = this.#clampAltitude(altitude);
     const value = Math.trunc(Number(material));
-    if (!(value in this.palette)) throw new RangeError(`Unknown material id: ${material}`);
+    if (!this.tileById.has(value)) throw new RangeError(`Unknown material id: ${material}`);
     const location = this.#cellLocation(x, y, z);
     const chunk = this.getChunk(location.cx, location.cy, z);
     if (chunk.cells[location.index] === value) return false;
@@ -230,7 +332,7 @@ export default class World {
         const dy = y - worldY;
         if (dx * dx + dy * dy > r2 + this.hash(x, y, z + 91) * r * 0.42) continue;
         const material = this.materialAt(x, y, z);
-        if (material === World.AIR || material === World.WATER) continue;
+        if (!this.tileById.get(material)?.mineable) continue;
         last = material;
         const replacement = z < 0 && this.touchesWater(x, y, z) ? World.WATER : World.AIR;
         if (this.setMaterial(x, y, z, replacement, { collector: changes })) removed++;
@@ -461,7 +563,8 @@ export default class World {
           const below = this.palette[this.materialAt(x, y, this.altitude - 1)];
           color = [below[0] * 0.46, below[1] * 0.46, below[2] * 0.46];
         }
-        const grain = material > World.WATER ? (this.hash(x, y, this.altitude) * 17 | 0) - 8 : 0;
+        const tile = this.tileById.get(material);
+        const grain = tile?.solid ? (this.hash(x, y, this.altitude) * 17 | 0) - 8 : 0;
         const i = (sy * viewport.width + sx) * 4;
         data[i] = this.#clamp(color[0] + grain, 0, 255);
         data[i + 1] = this.#clamp(color[1] + grain, 0, 255);
@@ -519,6 +622,7 @@ export default class World {
       chunkSize: this.chunkSize,
       minAltitude: this.minAltitude,
       maxAltitude: this.maxAltitude,
+      tiles: this.tiles,
       revision: Math.max(this.revision, this.remoteRevision),
       chunks: [...this.dirtyChunks].map((key) => {
         const chunk = this.chunks.get(key);
