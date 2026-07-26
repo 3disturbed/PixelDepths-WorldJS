@@ -382,7 +382,9 @@
           north: [0, -2], south: [0, 2], west: [-2, 0], east: [2, 0]
         }[player.direction];
         const target = { x: player.x + facing[0], y: player.y + facing[1] };
-        const removed = world.mine(target.x, target.y, 2.4, world.altitude, {
+        // Mine the character's physical layer so the same cells are used by
+        // movement collision immediately, regardless of the viewed HUD layer.
+        const removed = world.mine(target.x, target.y, 2.4, player.altitude, {
           operationId: `local:${Math.floor(now)}`,
           render: false
         });
