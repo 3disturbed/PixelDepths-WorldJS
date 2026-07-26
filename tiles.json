@@ -1,0 +1,74 @@
+{
+  "air": {
+    "id": 0,
+    "name": "Air",
+    "color": [9, 15, 21],
+    "solid": false,
+    "mineable": false,
+    "liquid": false,
+    "hardness": 0
+  },
+  "water": {
+    "id": 1,
+    "name": "Water",
+    "color": [26, 111, 145],
+    "solid": false,
+    "mineable": false,
+    "liquid": true,
+    "hardness": 0
+  },
+  "sand": {
+    "id": 2,
+    "name": "Sand",
+    "color": [216, 174, 91],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 1
+  },
+  "grass": {
+    "id": 3,
+    "name": "Grass",
+    "color": [74, 126, 71],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 1
+  },
+  "soil": {
+    "id": 4,
+    "name": "Soil",
+    "color": [112, 72, 48],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 2
+  },
+  "stone": {
+    "id": 5,
+    "name": "Stone",
+    "color": [91, 99, 101],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 4
+  },
+  "ore": {
+    "id": 6,
+    "name": "Ore",
+    "color": [190, 112, 47],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 6
+  },
+  "crystal": {
+    "id": 7,
+    "name": "Crystal",
+    "color": [86, 207, 190],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 8
+  }
+}

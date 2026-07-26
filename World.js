@@ -89,6 +89,21 @@ export default class World {
   static CRYSTAL = 7;
   static PROTOCOL = 1;
 
+  static async loadTiles(url = "./tiles.json", options = {}) {
+    const response = await fetch(url, {
+      cache: options.cache ?? "no-cache",
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Unable to load tiles from "${url}" (${response.status} ${response.statusText}).`);
+    }
+    const tiles = await response.json();
+    if (!tiles || typeof tiles !== "object" || Array.isArray(tiles)) {
+      throw new TypeError(`Tile file "${url}" must contain a JSON object.`);
+    }
+    return tiles;
+  }
+
   constructor(canvas, options = {}) {
     if (!canvas || typeof canvas.getContext !== "function" ||
         typeof canvas.getBoundingClientRect !== "function") {
@@ -134,6 +149,7 @@ export default class World {
     this.stats = { removed: 0, lastMaterial: "—", loadedChunks: 0 };
 
     this.tiles = this.#prepareTiles(options.tiles ?? World.TILES);
+    this.tileSetId = String(options.tileSetId ?? "worldjs-default-v1");
     this.tileById = new Map(Object.entries(this.tiles).map(([key, tile]) => [tile.id, { key, ...tile }]));
     this.palette = Object.fromEntries([...this.tileById].map(([id, tile]) => [id, tile.color]));
     this.materialNames = [];
@@ -377,6 +393,7 @@ export default class World {
       protocol: World.PROTOCOL,
       worldId: this.worldId,
       seed: this.seed,
+      tileSetId: this.tileSetId,
       actorId: this.actorId,
       revision: this.revision,
       changes,
@@ -389,7 +406,10 @@ export default class World {
    */
   applyChanges(packet, options = {}) {
     if (!packet || packet.protocol !== World.PROTOCOL) throw new Error("Unsupported world change protocol.");
-    if (packet.worldId !== this.worldId || packet.seed !== this.seed) throw new Error("Change packet belongs to another world.");
+    if (packet.worldId !== this.worldId || packet.seed !== this.seed ||
+        packet.tileSetId !== this.tileSetId) {
+      throw new Error("Change packet belongs to another world or tile set.");
+    }
     const strict = options.strictRevision !== false;
     const incomingRevision = Math.trunc(packet.revision ?? 0);
     if (strict && incomingRevision < this.remoteRevision) return 0;
@@ -434,6 +454,7 @@ export default class World {
       protocol: World.PROTOCOL,
       worldId: this.worldId,
       seed: this.seed,
+      tileSetId: this.tileSetId,
       cx,
       cy,
       z: chunk.altitude,
@@ -443,7 +464,10 @@ export default class World {
   }
 
   importChunk(snapshot, options = {}) {
-    if (snapshot.worldId !== this.worldId || snapshot.seed !== this.seed) throw new Error("Chunk belongs to another world.");
+    if (snapshot.worldId !== this.worldId || snapshot.seed !== this.seed ||
+        snapshot.tileSetId !== this.tileSetId) {
+      throw new Error("Chunk belongs to another world or tile set.");
+    }
     if (!Array.isArray(snapshot.cells) || snapshot.cells.length !== this.chunkSize ** 2) {
       throw new Error("Invalid chunk cell data.");
     }
@@ -617,6 +641,7 @@ export default class World {
       protocol: World.PROTOCOL,
       worldId: this.worldId,
       seed: this.seed,
+      tileSetId: this.tileSetId,
       width: this.width,
       height: this.height,
       chunkSize: this.chunkSize,

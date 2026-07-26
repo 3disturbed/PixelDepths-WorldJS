@@ -279,6 +279,7 @@
     const $ = (selector) => document.querySelector(selector);
     const WORLD_SIZE = 16384;
     const start = WORLD_SIZE / 2;
+    const tiles = await World.loadTiles("./tiles.json");
     let seed = 4182;
     let serverRevision = 0;
     let mining = false;
@@ -291,6 +292,8 @@
       worldId: "terrain-test",
       actorId: "client-a",
       seed,
+      tiles,
+      tileSetId: "terrain-test-v1",
       width: WORLD_SIZE,
       height: WORLD_SIZE,
       cameraX: start,
@@ -304,6 +307,8 @@
       worldId: "terrain-test",
       actorId: "client-b",
       seed,
+      tiles,
+      tileSetId: "terrain-test-v1",
       width: WORLD_SIZE,
       height: WORLD_SIZE,
       cameraX: start,

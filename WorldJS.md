@@ -72,6 +72,8 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `seed` | `4182` | Deterministic terrain seed |
 | `worldId` | `world-{seed}` | Multiplayer/save identity |
 | `actorId` | `client` | Unique local peer identity |
+| `tiles` | `World.TILES` | JSON-compatible tile definitions |
+| `tileSetId` | `worldjs-default-v1` | Version identity for the tile schema |
 | `brushRadius` | `7` | Default mining radius |
 | `cameraX`, `cameraY` | world center | Initial camera center |
 | `zoom` | `5` | CSS pixels per terrain cell |
@@ -79,6 +81,80 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `autoRender` | `true` | Render after public mutations |
 
 Keep `seed`, dimensions, chunk size, altitude range, and generator code identical across clients and servers. `worldId` must identify that exact world instance.
+
+## JSON tile definitions
+
+Every pixel type is defined in `tiles.json`. Load it before constructing a world:
+
+```js
+const tiles = await World.loadTiles("./tiles.json");
+
+const world = new World(canvas, {
+  tiles,
+  tileSetId: "realm-tiles-v1"
+});
+```
+
+`World.loadTiles(url, options?)` uses `fetch()`, checks the HTTP response, parses the JSON, and returns the tile object. Its optional `cache` and `signal` values are passed to `fetch()`:
+
+```js
+const controller = new AbortController();
+const tiles = await World.loadTiles("/data/tiles.json", {
+  cache: "reload",
+  signal: controller.signal
+});
+```
+
+`World.TILES` contains the same built-in definitions as a fallback for offline construction:
+
+```js
+console.log(JSON.stringify(World.TILES, null, 2));
+```
+
+Its shape is:
+
+```json
+{
+  "stone": {
+    "id": 5,
+    "name": "Stone",
+    "color": [91, 99, 101],
+    "solid": true,
+    "mineable": true,
+    "liquid": false,
+    "hardness": 4
+  }
+}
+```
+
+Each definition contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | integer `0–255` | Compact value stored in chunk arrays and network deltas |
+| `name` | string | Display name |
+| `color` | `[r, g, b]` | Canvas rendering color |
+| `solid` | boolean | Whether the tile is treated as solid terrain |
+| `mineable` | boolean | Whether `mine()` may remove it |
+| `liquid` | boolean | Whether the tile represents a liquid |
+| `hardness` | number | Game-facing hardness metadata |
+
+Create a custom set by copying the JSON data and passing it to the constructor:
+
+```js
+const tiles = JSON.parse(JSON.stringify(World.TILES));
+tiles.stone.color = [110, 116, 120];
+tiles.stone.hardness = 5;
+
+const world = new World(canvas, {
+  tiles,
+  tileSetId: "realm-tiles-v2"
+});
+```
+
+The class clones and validates the object, so later changes to the source object do not silently mutate a running world. IDs must be unique. The eight generator keys—`air`, `water`, `sand`, `grass`, `soil`, `stone`, `ore`, and `crystal`—must remain present with IDs `0–7`. Additional tile definitions may use any unused ID through `255`.
+
+`tileSetId` is included in change packets, chunk snapshots, and saves. Multiplayer peers reject data from a different tile schema. Increase it whenever tile IDs or their gameplay meaning changes.
 
 ## Camera and rendering
 
