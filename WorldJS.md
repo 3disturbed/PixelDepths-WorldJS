@@ -192,7 +192,7 @@ The class clones and validates the object, so later changes to the source object
 
 ## 16×16 tilemap atlas
 
-`World.js` automatically attempts to load `tilemap.png`. Every atlas cell is exactly `16 × 16` source pixels.
+`World.js` automatically attempts to load `Tiles.png`. Filenames are case-sensitive on many servers, so retain the capital `T`. Every atlas cell is exactly `16 × 16` source pixels.
 
 The source lookup is:
 
@@ -226,13 +226,15 @@ width  = 21 * 16 = 336 pixels
 height =  5 * 16 =  80 pixels
 ```
 
+The current `Tiles.png` is `64 × 64`, so it contains atlas space for Tile IDs `0–3` and Biome IDs `0–3`. All other tile/biome combinations correctly use solid-color fallback until the image is expanded to `336 × 80`.
+
 Configuration lives in `generation.json`:
 
 ```json
 {
   "rendering": {
     "tileSize": 16,
-    "tilemapUrl": "./tilemap.png",
+    "tilemapUrl": "./Tiles.png",
     "fallbackCellSize": 16
   }
 }
@@ -256,11 +258,11 @@ await world.tilemapReady;
 You can also load or replace an atlas later:
 
 ```js
-await world.loadTilemap("./tilemap.png");
+await world.loadTilemap("./Tiles.png");
 world.setTilemap(existingImageElement);
 ```
 
-If `tilemap.png` fails to load, rendering continues with the biome-tinted solid color from `tiles.json`. If an individual atlas coordinate falls outside the image bounds, only that cell uses the solid-color fallback. An excavated air cell renders the lower altitude’s atlas tile with a dark overlay.
+If `Tiles.png` fails to load, rendering continues with the biome-tinted solid color from `tiles.json`. If an individual atlas coordinate falls outside the image bounds, only that cell uses the solid-color fallback. An excavated air cell renders the lower altitude’s atlas tile with a dark overlay.
 
 Tilemap events:
 

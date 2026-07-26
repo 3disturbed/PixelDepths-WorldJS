@@ -51,7 +51,7 @@
   },
   "rendering": {
     "tileSize": 16,
-    "tilemapUrl": "./tilemap.png",
+    "tilemapUrl": "./Tiles.png",
     "fallbackCellSize": 16
   }
 }
