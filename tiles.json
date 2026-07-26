@@ -19,5 +19,6 @@
   "iron": { "id": 17, "name": "Iron", "color": [119, 105, 91], "solid": true, "mineable": true, "liquid": false, "hardness": 7, "resource": true },
   "silver": { "id": 18, "name": "Silver", "color": [190, 207, 212], "solid": true, "mineable": true, "liquid": false, "hardness": 8, "resource": true },
   "obsidian": { "id": 19, "name": "Obsidian", "color": [45, 36, 58], "solid": true, "mineable": true, "liquid": false, "hardness": 9, "resource": true },
-  "ember_crystal": { "id": 20, "name": "Ember Crystal", "color": [234, 91, 49], "solid": true, "mineable": true, "liquid": false, "hardness": 10, "resource": true }
+  "ember_crystal": { "id": 20, "name": "Ember Crystal", "color": [234, 91, 49], "solid": true, "mineable": true, "liquid": false, "hardness": 10, "resource": true },
+  "dirt_floor": { "id": 21, "name": "Dirt Floor", "color": [91, 59, 40], "solid": false, "walkable": true, "mineable": false, "liquid": false, "hardness": 0 }
 }

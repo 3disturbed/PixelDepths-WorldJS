@@ -82,6 +82,19 @@
       font-size: 18px;
     }
     .fullscreen:hover, .fullscreen:active { border-color: var(--acid); background: #1d2a2be8; }
+    .top-actions { display: flex; gap: 6px; }
+    .ladder-button {
+      min-width: 48px;
+      min-height: 48px;
+      padding: 0 8px;
+      pointer-events: auto;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--paper);
+      cursor: pointer;
+      font-size: 15px;
+    }
+    .ladder-button:hover, .ladder-button:active { border-color: var(--acid); color: var(--acid); }
     .left-rail { position: absolute; top: 92px; left: max(12px, env(safe-area-inset-left)); display: grid; gap: 10px; }
     .status-card { min-width: 154px; padding: 11px 12px; }
     .status-card label { display: flex; justify-content: space-between; color: var(--muted); font-size: 7px; letter-spacing: .1em; }
@@ -187,6 +200,8 @@
       .readout:nth-child(6) { display: none; }
       .left-rail { top: 132px; }
       .fullscreen { flex-basis: 42px; min-height: 42px; }
+      .top-actions { gap: 4px; }
+      .ladder-button { min-width: 42px; min-height: 42px; padding: 0 5px; }
     }
     @media (hover: none) and (pointer: coarse) and (orientation: landscape) {
       .topbar { padding: max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left)); }
@@ -221,7 +236,11 @@
         <div class="readout"><span>SEED</span><strong id="seed">—</strong></div>
         <div class="readout"><span>ATLAS</span><strong id="atlas">LOADING</strong></div>
       </div>
-      <button class="fullscreen" id="fullscreen" type="button" aria-label="Enter fullscreen" title="Fullscreen">⛶</button>
+      <div class="top-actions">
+        <button class="ladder-button" id="ladderUp" type="button" aria-label="Place ladder up" title="Place ladder up">🪜↑</button>
+        <button class="ladder-button" id="ladderDown" type="button" aria-label="Place ladder down" title="Place ladder down">🪜↓</button>
+        <button class="fullscreen" id="fullscreen" type="button" aria-label="Enter fullscreen" title="Fullscreen">⛶</button>
+      </div>
     </div>
 
     <div class="left-rail">
@@ -242,6 +261,7 @@
     <div class="help">
       <div><kbd>WASD</kbd> MOVE &nbsp; <kbd>SHIFT</kbd> SPRINT</div>
       <div><kbd>SPACE</kbd> MINE FORWARD &nbsp; <kbd>Q / E</kbd> LAYER &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
+      <div><kbd>R / F</kbd> PLACE LADDER &nbsp; <kbd>ENTER</kbd> CLIMB</div>
     </div>
 
     <div class="toast" id="toast"></div>
@@ -261,9 +281,10 @@
       // Give every page load fresh module and asset URLs. This mirrors a hard
       // refresh even on mobile browsers that aggressively retain static files.
       const loadToken = Date.now().toString(36);
-      const [{ default: World }, { default: OSJoypad }] = await Promise.all([
+      const [{ default: World }, { default: OSJoypad }, { default: Ladder }] = await Promise.all([
         import(`./World.js?reload=${loadToken}`),
-        import(`./OSJoypad.js?reload=${loadToken}`)
+        import(`./OSJoypad.js?reload=${loadToken}`),
+        import(`./Ladder.js?reload=${loadToken}`)
       ]);
       const [tiles, biomes, loadedGeneration] = await Promise.all([
         World.loadTiles(`./tiles.json?reload=${loadToken}`, { cache: "reload" }),
@@ -294,7 +315,7 @@
         tiles,
         biomes,
         generation,
-        tileSetId: "tiles-v1",
+        tileSetId: "tiles-v2",
         biomeSetId: "biomes-v1",
         generationSetId: "generation-v1",
         autoRender: false
@@ -391,6 +412,41 @@
         if (removed) toast(`EXCAVATED ${removed} PIXELS`);
       }
 
+      function facingCell(distance = 1) {
+        const [dx, dy] = {
+          north: [0, -distance], south: [0, distance],
+          west: [-distance, 0], east: [distance, 0]
+        }[player.direction];
+        return { x: Math.floor(player.x + dx), y: Math.floor(player.y + dy) };
+      }
+
+      function placeLadder(direction) {
+        const target = facingCell();
+        const ladder = new Ladder({
+          x: target.x,
+          y: target.y,
+          altitude: player.altitude,
+          direction
+        });
+        const result = ladder.place(world);
+        toast(result.ok
+          ? `${direction.toUpperCase()} LADDER PLACED`
+          : `CANNOT PLACE: ${result.reason.replaceAll("-", " ").toUpperCase()}`);
+        return result;
+      }
+
+      function useNearbyLadder() {
+        const target = facingCell();
+        const ladders = [
+          ...world.getPlaceablesAt(player.x, player.y, player.altitude),
+          ...world.getPlaceablesAt(target.x, target.y, player.altitude)
+        ].filter((item) => item.type === "ladder");
+        const result = ladders[0]?.use(player) ?? { ok: false, reason: "no-ladder" };
+        toast(result.ok
+          ? `LADDER TO ${result.altitude > 0 ? "+" : ""}${result.altitude}`
+          : `CANNOT CLIMB: ${result.reason.replaceAll("-", " ").toUpperCase()}`);
+      }
+
       canvas.addEventListener("wheel", (event) => {
         event.preventDefault();
         world.zoom = Math.max(6, Math.min(28, world.zoom * (event.deltaY > 0 ? 0.88 : 1.12)));
@@ -399,6 +455,8 @@
       $("#downLayer").addEventListener("click", () => setLayer(world.altitude - 1));
       $("#upLayer").addEventListener("click", () => setLayer(world.altitude + 1));
       $("#reseed").addEventListener("click", reseed);
+      $("#ladderUp").addEventListener("click", () => placeLadder("up"));
+      $("#ladderDown").addEventListener("click", () => placeLadder("down"));
       const fullscreenButton = $("#fullscreen");
       const fullscreenElement = () => document.fullscreenElement ?? document.webkitFullscreenElement;
       async function toggleFullscreen() {
@@ -419,6 +477,9 @@
       addEventListener("keydown", (event) => {
         if (event.code === "KeyQ") setLayer(world.altitude - 1);
         if (event.code === "KeyE") setLayer(world.altitude + 1);
+        if (event.code === "KeyR") placeLadder("up");
+        if (event.code === "KeyF") placeLadder("down");
+        if (event.code === "Enter") useNearbyLadder();
         if (event.code === "Space") {
           event.preventDefault();
           miningHeld = true;
@@ -434,7 +495,7 @@
           miningHeld = pressed;
           if (pressed) mineFromPlayer(performance.now());
         }
-        if (pressed && action === "interact") toast("INTERACT");
+        if (pressed && action === "interact") useNearbyLadder();
         if (pressed && action === "menu") toast("MENU PLUGIN SLOT");
       });
 

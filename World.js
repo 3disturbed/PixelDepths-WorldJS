@@ -1,5 +1,5 @@
-import WorldCollision from "./World-Collision.js?v=20260726-4";
-import Player from "./Player.js?v=20260726-4";
+import WorldCollision from "./World-Collision.js?v=20260726-5";
+import Player from "./Player.js?v=20260726-5";
 
 /**
  * World.js
@@ -110,6 +110,7 @@ export default class World {
     silver: { id: 18, name: "Silver", color: [190, 207, 212], solid: true, mineable: true, liquid: false, hardness: 8, resource: true },
     obsidian: { id: 19, name: "Obsidian", color: [45, 36, 58], solid: true, mineable: true, liquid: false, hardness: 9, resource: true },
     ember_crystal: { id: 20, name: "Ember Crystal", color: [234, 91, 49], solid: true, mineable: true, liquid: false, hardness: 10, resource: true },
+    dirt_floor: { id: 21, name: "Dirt Floor", color: [91, 59, 40], solid: false, walkable: true, mineable: false, liquid: false, hardness: 0 },
   };
 
   static AIR = 0;
@@ -120,6 +121,7 @@ export default class World {
   static STONE = 5;
   static ORE = 6;
   static CRYSTAL = 7;
+  static DIRT_FLOOR = 21;
   static PROTOCOL = 1;
 
   static async loadTiles(url = "./tiles.json", options = {}) {
@@ -245,6 +247,7 @@ export default class World {
     this.tilemapReady = Promise.resolve(null);
     this.collision = new WorldCollision(this, options.collision);
     this.players = new Map();
+    this.placeables = new Map();
 
     this.buffer = (canvas.ownerDocument ?? document).createElement("canvas");
     this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
@@ -281,6 +284,7 @@ export default class World {
       }
       tile.name = String(tile.name ?? key);
       tile.solid = Boolean(tile.solid);
+      tile.walkable = Boolean(tile.walkable);
       tile.mineable = Boolean(tile.mineable);
       tile.liquid = Boolean(tile.liquid);
       tile.hardness = Math.max(0, Number(tile.hardness ?? 0));
@@ -770,7 +774,9 @@ export default class World {
         const material = this.materialAt(x, y, z);
         if (!this.tileById.get(material)?.mineable) continue;
         last = material;
-        const replacement = z < 0 && this.touchesWater(x, y, z) ? World.WATER : World.AIR;
+        const replacement = z < 0 && this.touchesWater(x, y, z)
+          ? World.WATER
+          : World.DIRT_FLOOR;
         if (this.setMaterial(x, y, z, replacement, { collector: changes })) removed++;
       }
     }
@@ -934,6 +940,8 @@ export default class World {
 
   generate(seed = this.seed) {
     this.seed = Math.trunc(seed);
+    for (const placeable of this.placeables.values()) placeable.world = null;
+    this.placeables.clear();
     this.chunks.clear();
     this.dirtyChunks.clear();
     this.changeLog.length = 0;
@@ -997,6 +1005,47 @@ export default class World {
 
   getCollisionReports(options) {
     return this.collision.getReports(options);
+  }
+
+  addPlaceable(placeable) {
+    if (!placeable || typeof placeable.id !== "string" || typeof placeable.render !== "function") {
+      throw new TypeError("Placeable objects require a string id and render method.");
+    }
+    if (this.placeables.has(placeable.id)) {
+      throw new Error(`Placeable "${placeable.id}" already exists.`);
+    }
+    placeable.world = this;
+    this.placeables.set(placeable.id, placeable);
+    this.emit("placeableadd", { placeable });
+    if (this.autoRender) this.render();
+    return placeable;
+  }
+
+  removePlaceable(id) {
+    const key = String(id);
+    const placeable = this.placeables.get(key);
+    if (!placeable) return false;
+    this.placeables.delete(key);
+    placeable.world = null;
+    this.emit("placeableremove", { placeable });
+    if (this.autoRender) this.render();
+    return true;
+  }
+
+  getPlaceablesAt(x, y, altitude = this.altitude) {
+    const ix = Math.floor(Number(x));
+    const iy = Math.floor(Number(y));
+    const z = this.#clampAltitude(altitude);
+    return [...this.placeables.values()].filter((placeable) =>
+      placeable.x === ix && placeable.y === iy && placeable.altitude === z);
+  }
+
+  renderPlaceables(ctx = this.ctx) {
+    let rendered = 0;
+    for (const placeable of this.placeables.values()) {
+      if (placeable.render(ctx)) rendered++;
+    }
+    return rendered;
   }
 
   createPlayer(options = {}) {
@@ -1149,6 +1198,7 @@ export default class World {
     );
     }
 
+    this.renderPlaceables(this.ctx);
     this.renderPlayers(this.ctx);
 
     if (this.pointer.active) {
@@ -1256,6 +1306,7 @@ export default class World {
       generationSetId: this.generationSetId,
       biomes: this.biomes,
       generation: this.generation,
+      placeables: [...this.placeables.values()].map((placeable) => placeable.serialize()),
       biomeCenter: { ...this.biomeCenter },
       spawnRadius: this.spawnRadius,
       biomeWarpStrength: this.biomeWarpStrength,

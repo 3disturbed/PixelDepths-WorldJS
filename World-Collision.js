@@ -44,6 +44,12 @@ export default class WorldCollision {
     return Boolean(this.tileAt(x, y, altitude)?.liquid);
   }
 
+  isWalkableAt(x, y, altitude) {
+    if (!this.inBounds(x, y)) return false;
+    const tile = this.tileAt(x, y, altitude);
+    return Boolean(tile && (tile.solid || tile.walkable) && !tile.liquid);
+  }
+
   getSurfaceAltitude(x, y, options = {}) {
     if (!this.inBounds(x, y)) return null;
     const from = Math.min(
@@ -55,7 +61,7 @@ export default class WorldCollision {
       Math.ceil(options.toAltitude ?? this.world.minAltitude),
     );
     for (let altitude = from; altitude >= to; altitude--) {
-      if (this.tileAt(x, y, altitude)?.solid) return altitude;
+      if (this.isWalkableAt(x, y, altitude)) return altitude;
     }
     return null;
   }

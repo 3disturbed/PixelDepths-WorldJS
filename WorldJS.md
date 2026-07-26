@@ -14,6 +14,8 @@ It targets modern evergreen browsers with ES2022 class-field and private-method 
 | `Player-Render.js` | Sprite loading, animation, shadows, and presentation smoothing |
 | `Player-Plugin.js` | Base contract for modular player systems |
 | `OSJoypad.js` | Phone analog stick and configurable RPG action buttons |
+| `Placeable.js` | Base lifecycle, validation, rendering, and serialization for placed objects |
+| `Ladder.js` | Up/down placeable ladders connecting adjacent altitude layers |
 | `tiles.json` | Pixel materials and resource materials |
 | `Biomes.json` | The five radial biomes and biome-specific content |
 | `generation.json` | Terrain shape, sea level, spawn, caves, and resource placement |
@@ -174,6 +176,7 @@ Each definition contains:
 | `name` | string | Display name |
 | `color` | `[r, g, b]` | Canvas rendering color |
 | `solid` | boolean | Whether the tile is treated as solid terrain |
+| `walkable` | boolean | Whether a non-solid tile can support surface movement |
 | `mineable` | boolean | Whether `mine()` may remove it |
 | `liquid` | boolean | Whether the tile represents a liquid |
 | `hardness` | number | Game-facing hardness metadata |
@@ -192,6 +195,35 @@ const world = new World(canvas, {
 ```
 
 The class clones and validates the object, so later changes to the source object do not silently mutate a running world. IDs must be unique. The eight base generator keys—`air`, `water`, `sand`, `grass`, `soil`, `stone`, `ore`, and `crystal`—must remain present with IDs `0–7`. Biome surface and resource keys must also resolve to valid tiles. Additional definitions may use any unused ID through `255`.
+
+Mining converts mineable walls into the non-solid `dirt_floor` material. Dirt
+floor remains at the same altitude and supports surface movement, while water
+and air remain non-walkable. Repeated mining cannot remove dirt floor.
+
+## Placeables and ladders
+
+`Placeable.js` is the parent class for world objects that can be validated,
+placed, rendered, removed, and serialized. `Ladder.js` inherits from it and
+connects adjacent altitude layers:
+
+```js
+import Ladder from "./Ladder.js";
+
+const ladder = new Ladder({
+  x: 120,
+  y: 80,
+  altitude: 1,
+  direction: "down"
+});
+
+const placement = ladder.place(world);
+if (placement.ok) ladder.use(player);
+```
+
+Ladders require walkable, non-water floors at both ends. `world.addPlaceable()`,
+`world.removePlaceable()`, and `world.getPlaceablesAt()` manage placed objects;
+`world.render()` draws them before players and `world.serialize()` includes
+their serialized state.
 
 `tileSetId` is included in change packets, chunk snapshots, and saves. Multiplayer peers reject data from a different tile schema. Increase it whenever tile IDs or their gameplay meaning changes.
 

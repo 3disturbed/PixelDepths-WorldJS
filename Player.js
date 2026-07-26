@@ -1,5 +1,5 @@
-import PlayerPlugin from "./Player-Plugin.js?v=20260726-4";
-import PlayerRender from "./Player-Render.js?v=20260726-4";
+import PlayerPlugin from "./Player-Plugin.js?v=20260726-5";
+import PlayerRender from "./Player-Render.js?v=20260726-5";
 
 /**
  * Player.js
