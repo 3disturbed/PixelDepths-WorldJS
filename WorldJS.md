@@ -9,6 +9,7 @@ It targets modern evergreen browsers with ES2022 class-field and private-method 
 | File | Responsibility |
 | --- | --- |
 | `World.js` | Generation, chunks, rendering, destruction, saves, and multiplayer deltas |
+| `World-Collision.js` | Terrain collision, surface walking, ledges, falling, raycasts, and reports |
 | `tiles.json` | Pixel materials and resource materials |
 | `Biomes.json` | The five radial biomes and biome-specific content |
 | `generation.json` | Terrain shape, sea level, spawn, caves, and resource placement |
@@ -33,7 +34,7 @@ With the defaults, one loaded altitude chunk uses 4 KiB for material cells. The 
 <canvas id="world" style="width:100%; height:600px"></canvas>
 
 <script type="module">
-  import World from "./World.js?v=tilegrid-fallback-5";
+  import World from "./World.js?v=terrain-collision-6";
 
   const canvas = document.querySelector("#world");
   const [tiles, biomes, generation] = await Promise.all([
@@ -109,6 +110,7 @@ Open `TerrainTest.html` for the included interactive test harness. It provides m
 | `zoom` | `generation.rendering.fallbackCellSize` | CSS pixels per terrain cell |
 | `maxChangeLog` | `10000` | Locally retained cell changes |
 | `autoRender` | `true` | Render after public mutations |
+| `collision` | `{}` | Collision, drop, gravity, and reporting options |
 
 Keep `seed`, dimensions, chunk size, altitude range, and generator code identical across clients and servers. `worldId` must identify that exact world instance.
 
@@ -500,6 +502,218 @@ Material constants:
 | `World.ORE` | `6` |
 | `World.CRYSTAL` | `7` |
 
+## Terrain collision and drop detection
+
+`World.js` imports `World-Collision.js` and creates one collision engine automatically:
+
+```js
+const world = new World(canvas, {
+  collision: {
+    radius: 0.38,
+    maxStep: 1,
+    maxDrop: 2,
+    dropThreshold: 0.5,
+    lethalDrop: 4,
+    gravity: 18,
+    terminalVelocity: 28,
+    skin: 0.04,
+    maxReports: 256
+  }
+});
+
+world.collision; // WorldCollision instance
+```
+
+The engine reads live chunk state through `world.materialAt()`. Mining and multiplayer terrain changes therefore affect collision immediately; no separate collision mesh needs rebuilding.
+
+### Surface information
+
+Use surface queries for normal top-down outdoor movement:
+
+```js
+const altitude = world.getSurfaceAltitude(x, y);
+const surface = world.getSurfaceInfo(x, y, {
+  entityAltitude: player.altitude
+});
+```
+
+`getSurfaceInfo()` reports:
+
+```js
+{
+  x,
+  y,
+  altitude: 2,
+  material: 11,
+  tile: "snow",
+  solid: true,
+  liquidAltitude: null,
+  inWater: false,
+  submerged: false,
+  seaLevel: 0,
+  biome: "highlands"
+}
+```
+
+It scans from the highest altitude downward and returns the first solid tile. A fully excavated vertical shaft returns `altitude: null`.
+
+### Surface-aware entity movement
+
+`world.moveEntity()` defaults to surface movement:
+
+```js
+const player = {
+  x: spawn.x,
+  y: spawn.y,
+  altitude: world.getSurfaceAltitude(spawn.x, spawn.y),
+  radius: 0.38
+};
+
+const result = world.moveEntity(player, velocityX * dt, velocityY * dt, {
+  maxStep: 1,
+  maxDrop: 2,
+  allowDrop: false,
+  canSwim: false
+});
+```
+
+The method:
+
+- substeps long movements to prevent tunnelling;
+- samples the center and circular footprint;
+- blocks rises higher than `maxStep`;
+- detects ledges and excavated shafts;
+- blocks unsafe drops unless `allowDrop` is true;
+- optionally blocks entry into water;
+- updates the entity in place;
+- returns the final position, blocking reason, drop information, and report.
+
+Possible surface blocking reasons are `world-boundary`, `step-too-high`, `drop-too-far`, and `water`.
+
+### Cave and volume collision
+
+Use explicit volume mode when an entity moves through a cave layer and solid pixels are walls:
+
+```js
+const result = world.moveEntity(entity, dx, dy, {
+  mode: "volume",
+  altitude: -3,
+  radius: 0.42,
+  slide: true
+});
+```
+
+Volume movement uses swept-circle tests and axis sliding:
+
+```js
+world.collision.isSolidAt(x, y, altitude);
+world.collision.isLiquidAt(x, y, altitude);
+world.collision.overlapsSolid(x, y, altitude, radius);
+world.collision.sweepCircle(from, to, options);
+world.collision.moveCircle(entity, dx, dy, options);
+```
+
+Out-of-world coordinates are treated as solid boundaries.
+
+### Ledge and drop detection
+
+Inspect a move without applying it:
+
+```js
+const drop = world.detectDrop(
+  { x: player.x, y: player.y, altitude: player.altitude },
+  { x: targetX, y: targetY },
+  {
+    maxDrop: 2,
+    lethalDrop: 4
+  }
+);
+```
+
+The result includes:
+
+```js
+{
+  isDrop: true,
+  isVoid: false,
+  dropHeight: 3,
+  fromAltitude: 4,
+  landingAltitude: 1,
+  safe: false,
+  lethal: false,
+  intoWater: false,
+  landingMaterial: 3,
+  landingTile: "grass",
+  biome: "meadows",
+  from: { /* surface info */ },
+  to: { /* surface info */ }
+}
+```
+
+### Falling and landing
+
+Entities may carry `altitude`, `verticalVelocity`, and an automatically managed `fallStartAltitude`:
+
+```js
+function update(dt) {
+  const state = world.updateFalling(player, dt, {
+    gravity: 18,
+    terminalVelocity: 28,
+    lethalDrop: 4
+  });
+
+  if (state.landed) {
+    console.log(state.report.dropHeight, state.report.intoWater);
+  }
+}
+```
+
+`deltaSeconds` is clamped to `0.1` seconds by default to avoid extreme simulation jumps. Landing snaps to the current live terrain surface and reports drop height, impact velocity, lethality, water landing, and landing material.
+
+### Terrain raycasts
+
+Raycast through altitude layers:
+
+```js
+const hit = world.raycastTerrain(
+  { x: player.x, y: player.y, altitude: 5 },
+  { x: player.x, y: player.y, altitude: -5 },
+  { stepLength: 0.25 }
+);
+```
+
+The result contains `hit`, `point`, `fraction`, `distance`, and `material`.
+
+### Collision reporting
+
+Collision, drop, and landing events create ordered reports:
+
+```js
+const unsubscribe = world.collision.on("*", (report) => {
+  console.log(report.id, report.type, report);
+});
+
+world.on("collisionreport", (report) => {
+  sendToDiagnostics(report);
+});
+
+const newReports = world.getCollisionReports({ sinceId: lastSeenId });
+const landings = world.getCollisionReports({ type: "landing" });
+
+world.collision.clearReports();
+unsubscribe();
+```
+
+Report types:
+
+| Type | Produced by |
+| --- | --- |
+| `collision` | Blocked volume or surface movement |
+| `drop` | An allowed surface movement crossed a ledge |
+| `landing` | Falling simulation reached terrain |
+
+Reports are local diagnostics and are not automatically included in multiplayer terrain packets.
+
 ## Multiplayer model
 
 Use an authoritative server. Clients should send mining intents or locally predicted change packets; the server validates reach, radius, permissions, material, rate limits, and revision order before broadcasting an authoritative packet.
@@ -650,6 +864,7 @@ Events:
 | `change` | `{ source, revision, operationId?, changes }` |
 | `chunkload` | `{ cx, cy, altitude }` |
 | `reset` | `{ seed }` |
+| `collisionreport` | A collision, drop, or landing report from `world.collision` |
 
 ## Save state
 

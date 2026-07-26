@@ -1,3 +1,5 @@
+import WorldCollision from "./World-Collision.js";
+
 /**
  * World.js
  * Chunked, deterministic, layered pixel terrain for browser games.
@@ -240,6 +242,7 @@ export default class World {
     this.tilemap = null;
     this.tilemapUrl = options.tilemapUrl ?? this.generation.rendering.tilemapUrl;
     this.tilemapReady = Promise.resolve(null);
+    this.collision = new WorldCollision(this, options.collision);
 
     this.buffer = (canvas.ownerDocument ?? document).createElement("canvas");
     this.bufferCtx = this.buffer.getContext("2d", { alpha: false });
@@ -962,6 +965,36 @@ export default class World {
 
   pan(dx, dy) {
     this.setCamera(this.camera.x + Number(dx), this.camera.y + Number(dy));
+  }
+
+  getSurfaceAltitude(x, y, options) {
+    return this.collision.getSurfaceAltitude(x, y, options);
+  }
+
+  getSurfaceInfo(x, y, options) {
+    return this.collision.getSurfaceInfo(x, y, options);
+  }
+
+  moveEntity(entity, dx, dy, options) {
+    return options?.mode === "volume"
+      ? this.collision.moveCircle(entity, dx, dy, options)
+      : this.collision.moveOnSurface(entity, dx, dy, options);
+  }
+
+  detectDrop(from, to, options) {
+    return this.collision.detectDrop(from, to, options);
+  }
+
+  updateFalling(entity, deltaSeconds, options) {
+    return this.collision.updateFalling(entity, deltaSeconds, options);
+  }
+
+  raycastTerrain(from, to, options) {
+    return this.collision.raycast(from, to, options);
+  }
+
+  getCollisionReports(options) {
+    return this.collision.getReports(options);
   }
 
   setTilemap(image) {
