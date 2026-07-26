@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1112">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Strata — World.js Game</title>
   <style>
     :root {
@@ -242,21 +245,26 @@
   </div>
 
   <script type="module">
-    import World from "./World.js?v=player-render-3";
-    import OSJoypad from "./OSJoypad.js?v=1";
-
     const $ = (selector) => document.querySelector(selector);
     const canvas = $("#game");
     const loading = $("#loading");
     const loadingText = $("#loadingText");
 
     try {
+      // Give every page load fresh module and asset URLs. This mirrors a hard
+      // refresh even on mobile browsers that aggressively retain static files.
+      const loadToken = Date.now().toString(36);
+      const [{ default: World }, { default: OSJoypad }] = await Promise.all([
+        import(`./World.js?reload=${loadToken}`),
+        import(`./OSJoypad.js?reload=${loadToken}`)
+      ]);
       const [tiles, biomes, loadedGeneration] = await Promise.all([
-        World.loadTiles("./tiles.json"),
-        World.loadBiomes("./Biomes.json"),
-        World.loadGeneration("./generation.json")
+        World.loadTiles(`./tiles.json?reload=${loadToken}`, { cache: "reload" }),
+        World.loadBiomes(`./Biomes.json?reload=${loadToken}`, { cache: "reload" }),
+        World.loadGeneration(`./generation.json?reload=${loadToken}`, { cache: "reload" })
       ]);
       const generation = structuredClone(loadedGeneration);
+      generation.rendering.tilemapUrl = `./Tiles.png?reload=${loadToken}`;
       // Keep spawn safe but small enough that the first viewport shows coast,
       // hills, and biome variation instead of one large flat plateau.
       generation.spawn.radius = 72;
@@ -308,7 +316,7 @@
         ]
       }).bind(player);
       world.setAltitude(player.altitude);
-      world.setCamera(player.x, player.y, 10);
+      world.setCamera(player.x, player.y, 20);
       $("#seed").textContent = currentSeed;
 
       const atlasImage = await world.tilemapReady;
