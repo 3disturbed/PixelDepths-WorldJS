@@ -16,6 +16,7 @@ It targets modern evergreen browsers with ES2022 class-field and private-method 
 | `Biomes.json` | The five radial biomes and biome-specific content |
 | `generation.json` | Terrain shape, sea level, spawn, caves, and resource placement |
 | `TerrainTest.html` | Interactive two-client test harness |
+| `game.html` | Playable local game client |
 
 ## Why it scales
 

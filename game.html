@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1112">
+  <title>Strata — World.js Game</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #0b1112;
+      --panel: #111a1bdf;
+      --line: #53615b66;
+      --paper: #e8e2d1;
+      --muted: #8d9b94;
+      --acid: #ddec64;
+      --water: #56b8d2;
+      --danger: #e37759;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background: var(--ink);
+      color: var(--paper);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      user-select: none;
+    }
+    button { color: inherit; font: inherit; }
+    canvas {
+      position: fixed;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: #0b1415;
+      image-rendering: pixelated;
+      cursor: crosshair;
+      touch-action: none;
+    }
+    .hud { position: fixed; inset: 0; pointer-events: none; }
+    .topbar {
+      display: flex;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 12px;
+      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+    }
+    .brand, .readouts, .help, .status-card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      box-shadow: 0 12px 32px #0005;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 9px 12px; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      background: var(--acid);
+      color: var(--ink);
+      font-weight: 900;
+    }
+    .brand strong { display: block; font-size: 12px; letter-spacing: .08em; }
+    .brand small { display: block; margin-top: 3px; color: var(--muted); font-size: 7px; letter-spacing: .12em; }
+    .readouts { display: grid; grid-template-columns: repeat(5, minmax(70px, 1fr)); }
+    .readout { min-width: 74px; padding: 9px 11px; border-right: 1px solid var(--line); }
+    .readout:last-child { border-right: 0; }
+    .readout span { display: block; color: var(--muted); font-size: 7px; letter-spacing: .12em; }
+    .readout strong { display: block; overflow: hidden; margin-top: 5px; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+    .readout .ok { color: var(--acid); }
+    .readout .fallback { color: #e8b55f; }
+    .left-rail { position: absolute; top: 92px; left: max(12px, env(safe-area-inset-left)); display: grid; gap: 10px; }
+    .status-card { min-width: 154px; padding: 11px 12px; }
+    .status-card label { display: flex; justify-content: space-between; color: var(--muted); font-size: 7px; letter-spacing: .1em; }
+    .meter { height: 5px; margin-top: 7px; overflow: hidden; background: #ffffff12; }
+    .meter i { display: block; width: 100%; height: 100%; background: var(--acid); }
+    .meter.stamina i { background: var(--water); }
+    .altitude {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    .altitude button, .touch button, #mineButton {
+      pointer-events: auto;
+      border: 1px solid #71807877;
+      background: #152021e8;
+      cursor: pointer;
+    }
+    .altitude button { width: 28px; height: 25px; }
+    .altitude button:hover, .touch button:active, #mineButton:active { border-color: var(--acid); color: var(--acid); }
+    .altitude output { min-width: 56px; text-align: center; font-size: 10px; }
+    .help {
+      position: absolute;
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 8px;
+      line-height: 1.7;
+      text-align: right;
+    }
+    kbd { padding: 2px 5px; border: 1px solid #64726c77; color: var(--paper); }
+    .toast {
+      position: absolute;
+      left: 50%;
+      top: 84px;
+      transform: translate(-50%, -12px);
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      background: #0c1415e8;
+      color: var(--acid);
+      font-size: 9px;
+      opacity: 0;
+      transition: .18s ease;
+    }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+    .touch { display: none; }
+    .loading {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      place-items: center;
+      background: #0b1112;
+      transition: opacity .25s ease;
+    }
+    .loading.hidden { opacity: 0; pointer-events: none; }
+    .loading div { text-align: center; }
+    .loading b { display: block; color: var(--acid); font-size: 16px; letter-spacing: .15em; }
+    .loading span { display: block; margin-top: 10px; color: var(--muted); font-size: 8px; letter-spacing: .12em; }
+    .error { color: var(--danger) !important; }
+
+    @media (max-width: 860px) {
+      .topbar { align-items: flex-start; }
+      .readouts { grid-template-columns: repeat(3, 1fr); }
+      .readout:nth-child(3) { border-right: 0; }
+      .readout:nth-child(n+4) { border-top: 1px solid var(--line); }
+      .help { display: none; }
+      .touch { position: absolute; inset: auto 0 max(16px, env(safe-area-inset-bottom)); display: flex; justify-content: space-between; padding: 0 16px; }
+      .dpad { position: relative; width: 126px; height: 126px; pointer-events: auto; }
+      .touch button { position: absolute; width: 42px; height: 42px; border-radius: 4px; font-size: 16px; touch-action: none; }
+      .touch [data-control="up"] { top: 0; left: 42px; }
+      .touch [data-control="down"] { bottom: 0; left: 42px; }
+      .touch [data-control="left"] { top: 42px; left: 0; }
+      .touch [data-control="right"] { top: 42px; right: 0; }
+      #mineButton { position: static; align-self: flex-end; width: 82px; height: 82px; border-radius: 50%; color: var(--acid); }
+    }
+    @media (max-width: 580px) {
+      .brand small { display: none; }
+      .brand { padding: 7px; }
+      .readouts { grid-template-columns: repeat(2, 1fr); }
+      .readout:nth-child(2) { border-right: 0; }
+      .readout:nth-child(3) { border-right: 1px solid var(--line); border-top: 1px solid var(--line); }
+      .readout:nth-child(4) { border-right: 0; }
+      .readout:nth-child(5) { display: none; }
+      .left-rail { top: 132px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" aria-label="Strata top-down destructible world"></canvas>
+
+  <div class="hud">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div><strong>STRATA</strong><small>WORLD.JS GAME</small></div>
+      </div>
+      <div class="readouts">
+        <div class="readout"><span>BIOME</span><strong id="biome">—</strong></div>
+        <div class="readout"><span>POSITION</span><strong id="position">—</strong></div>
+        <div class="readout"><span>RESOURCES</span><strong id="resources">0</strong></div>
+        <div class="readout"><span>CAVES</span><strong id="caves">0</strong></div>
+        <div class="readout"><span>ATLAS</span><strong id="atlas">LOADING</strong></div>
+      </div>
+    </div>
+
+    <div class="left-rail">
+      <div class="status-card">
+        <label><span>HEALTH</span><span>100 / 100</span></label>
+        <div class="meter"><i></i></div>
+        <label style="margin-top:10px"><span>STAMINA</span><span>100 / 100</span></label>
+        <div class="meter stamina"><i></i></div>
+        <div class="altitude">
+          <button id="downLayer" type="button" aria-label="Lower viewed altitude">−</button>
+          <output id="layer">SEA 0</output>
+          <button id="upLayer" type="button" aria-label="Raise viewed altitude">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="help">
+      <div><kbd>WASD</kbd> MOVE &nbsp; <kbd>SHIFT</kbd> SPRINT</div>
+      <div><kbd>CLICK</kbd> MINE &nbsp; <kbd>Q / E</kbd> LAYER &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
+    </div>
+
+    <div class="touch">
+      <div class="dpad">
+        <button data-control="up" type="button">▲</button>
+        <button data-control="down" type="button">▼</button>
+        <button data-control="left" type="button">◀</button>
+        <button data-control="right" type="button">▶</button>
+      </div>
+      <button id="mineButton" type="button">MINE</button>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <div class="loading" id="loading">
+    <div><b>GENERATING WORLD</b><span id="loadingText">LOADING WORLD DATA</span></div>
+  </div>
+
+  <script type="module">
+    import World from "./World.js?v=game-1";
+
+    const $ = (selector) => document.querySelector(selector);
+    const canvas = $("#game");
+    const loading = $("#loading");
+    const loadingText = $("#loadingText");
+
+    try {
+      const [tiles, biomes, generation] = await Promise.all([
+        World.loadTiles("./tiles.json"),
+        World.loadBiomes("./Biomes.json"),
+        World.loadGeneration("./generation.json")
+      ]);
+
+      loadingText.textContent = "BUILDING SPAWN REGION";
+      const world = new World(canvas, {
+        worldId: "strata-local",
+        actorId: "local-authority",
+        seed: 4182,
+        width: 16384,
+        height: 16384,
+        chunkSize: 64,
+        maxLoadedChunks: 384,
+        tiles,
+        biomes,
+        generation,
+        tileSetId: "tiles-v1",
+        biomeSetId: "biomes-v1",
+        generationSetId: "generation-v1",
+        autoRender: false
+      });
+
+      const player = world.createPlayer({
+        id: "local-player",
+        role: "server",
+        speed: 5.5,
+        sprintMultiplier: 1.7,
+        radius: 0.36,
+        maxStep: 1,
+        maxDrop: 2,
+        canSwim: true,
+        spriteUrl: "./player.png",
+        fallbackColor: "#ddec64"
+      });
+      player.attachControls(window);
+      world.setAltitude(player.altitude);
+      world.setCamera(player.x, player.y, generation.rendering.fallbackCellSize);
+
+      const atlasImage = await world.tilemapReady;
+      $("#atlas").textContent = atlasImage ? `${atlasImage.naturalWidth}×${atlasImage.naturalHeight}` : "COLOR FALLBACK";
+      $("#atlas").className = atlasImage ? "ok" : "fallback";
+
+      let pointer = { x: player.x, y: player.y };
+      let mineHeld = false;
+      let lastMine = 0;
+      let lastFrame = performance.now();
+      let hudTimer = 0;
+      let toastTimer = null;
+
+      function toast(message) {
+        $("#toast").textContent = message;
+        $("#toast").classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 900);
+      }
+
+      function setLayer(value) {
+        world.altitude = Math.max(world.minAltitude, Math.min(world.maxAltitude, Math.round(value)));
+        $("#layer").textContent = world.altitude === 0
+          ? "SEA 0"
+          : `${world.altitude > 0 ? "+" : ""}${world.altitude}`;
+      }
+
+      function mine(now) {
+        if (now - lastMine < 110) return;
+        lastMine = now;
+        const removed = world.mine(pointer.x, pointer.y, 2.4, world.altitude, {
+          operationId: `local:${Math.floor(now)}`,
+          render: false
+        });
+        if (removed) toast(`EXCAVATED ${removed} PIXELS`);
+      }
+
+      canvas.addEventListener("pointermove", (event) => {
+        pointer = world.eventToWorld(event);
+        world.pointer = { ...pointer, active: true };
+      });
+      canvas.addEventListener("pointerdown", (event) => {
+        mineHeld = true;
+        canvas.setPointerCapture(event.pointerId);
+        pointer = world.eventToWorld(event);
+        mine(performance.now());
+      });
+      canvas.addEventListener("pointerup", () => { mineHeld = false; });
+      canvas.addEventListener("pointercancel", () => { mineHeld = false; });
+      canvas.addEventListener("pointerleave", () => { world.pointer.active = false; });
+      canvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        world.zoom = Math.max(6, Math.min(28, world.zoom * (event.deltaY > 0 ? 0.88 : 1.12)));
+      }, { passive: false });
+
+      $("#downLayer").addEventListener("click", () => setLayer(world.altitude - 1));
+      $("#upLayer").addEventListener("click", () => setLayer(world.altitude + 1));
+      addEventListener("keydown", (event) => {
+        if (event.code === "KeyQ") setLayer(world.altitude - 1);
+        if (event.code === "KeyE") setLayer(world.altitude + 1);
+      });
+
+      for (const button of document.querySelectorAll(".dpad button")) {
+        const control = button.dataset.control;
+        const press = (event) => {
+          event.preventDefault();
+          player.controls[control] = true;
+          button.setPointerCapture?.(event.pointerId);
+        };
+        const release = (event) => {
+          event.preventDefault();
+          player.controls[control] = false;
+        };
+        button.addEventListener("pointerdown", press);
+        button.addEventListener("pointerup", release);
+        button.addEventListener("pointercancel", release);
+      }
+      $("#mineButton").addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        mineHeld = true;
+        const facing = {
+          north: [0, -2], south: [0, 2], west: [-2, 0], east: [2, 0]
+        }[player.direction];
+        pointer = { x: player.x + facing[0], y: player.y + facing[1] };
+        mine(performance.now());
+      });
+      $("#mineButton").addEventListener("pointerup", () => { mineHeld = false; });
+
+      const resize = () => world.resize();
+      addEventListener("resize", resize);
+      resize();
+      setLayer(world.altitude);
+      loading.classList.add("hidden");
+
+      function updateHud(dt) {
+        hudTimer += dt;
+        if (hudTimer < 0.15) return;
+        hudTimer = 0;
+        const biome = world.getBiomeAt(player.x, player.y);
+        const cx = Math.floor(player.x / world.chunkSize);
+        const cy = Math.floor(player.y / world.chunkSize);
+        $("#biome").textContent = `${biome.name} / D${biome.danger}`;
+        $("#position").textContent = `${Math.round(player.x)}, ${Math.round(player.y)}, ${player.altitude}`;
+        $("#resources").textContent = world.getResourceSpawnNodes(cx, cy).length;
+        $("#caves").textContent = world.getCavesInChunk(cx, cy).length;
+      }
+
+      function frame(now) {
+        const dt = Math.min(0.05, (now - lastFrame) / 1000);
+        lastFrame = now;
+
+        const input = player.createInput(player.sampleControls(), dt);
+        player.enqueueInput(input);
+        player.processServerInputs(1);
+        if (mineHeld) mine(now);
+
+        world.camera.x += (player.x - world.camera.x) * Math.min(1, dt * 9);
+        world.camera.y += (player.y - world.camera.y) * Math.min(1, dt * 9);
+        world.render();
+        updateHud(dt);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    } catch (error) {
+      console.error(error);
+      loadingText.textContent = error.message;
+      loadingText.classList.add("error");
+    }
+  </script>
+</body>
+</html>
