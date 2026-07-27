@@ -237,8 +237,8 @@
         <div class="readout"><span>ATLAS</span><strong id="atlas">LOADING</strong></div>
       </div>
       <div class="top-actions">
-        <button class="ladder-button" id="ladderUp" type="button" aria-label="Place ladder up" title="Place ladder up">🪜↑</button>
-        <button class="ladder-button" id="ladderDown" type="button" aria-label="Place ladder down" title="Place ladder down">🪜↓</button>
+        <button class="ladder-button" id="ladderUp" type="button" aria-label="Use or place ladder up" title="Use or place ladder up">🪜↑</button>
+        <button class="ladder-button" id="ladderDown" type="button" aria-label="Use or place ladder down" title="Use or place ladder down">🪜↓</button>
         <button class="fullscreen" id="fullscreen" type="button" aria-label="Enter fullscreen" title="Fullscreen">⛶</button>
       </div>
     </div>
@@ -250,9 +250,9 @@
         <label style="margin-top:10px"><span>STAMINA</span><span>100 / 100</span></label>
         <div class="meter stamina"><i></i></div>
         <div class="altitude">
-          <button id="downLayer" type="button" aria-label="Lower viewed altitude">−</button>
+          <button id="downLayer" type="button" aria-label="Use or place ladder down">🪜↓</button>
           <output id="layer">SEA 0</output>
-          <button id="upLayer" type="button" aria-label="Raise viewed altitude">+</button>
+          <button id="upLayer" type="button" aria-label="Use or place ladder up">🪜↑</button>
         </div>
         <button class="reseed" id="reseed" type="button">GENERATE NEW SEED</button>
       </div>
@@ -260,8 +260,8 @@
 
     <div class="help">
       <div><kbd>WASD</kbd> MOVE &nbsp; <kbd>SHIFT</kbd> SPRINT</div>
-      <div><kbd>SPACE</kbd> MINE FORWARD &nbsp; <kbd>Q / E</kbd> LAYER &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
-      <div><kbd>R / F</kbd> PLACE LADDER &nbsp; <kbd>ENTER</kbd> CLIMB</div>
+      <div><kbd>SPACE</kbd> MINE FORWARD &nbsp; <kbd>WHEEL</kbd> ZOOM</div>
+      <div><kbd>Q / E</kbd> DOWN / UP LADDER &nbsp; <kbd>ENTER</kbd> CLIMB</div>
     </div>
 
     <div class="toast" id="toast"></div>
@@ -366,7 +366,10 @@
       }
 
       function setLayer(value) {
-        world.altitude = Math.max(world.minAltitude, Math.min(world.maxAltitude, Math.round(value)));
+        world.altitude = Math.max(
+          world.minAltitude,
+          Math.min(world.maxAltitude, Math.round(player.altitude))
+        );
         $("#layer").textContent = world.altitude === 0
           ? "SEA 0"
           : `${world.altitude > 0 ? "+" : ""}${world.altitude}`;
@@ -435,6 +438,21 @@
         return result;
       }
 
+      function activateLadder(direction) {
+        const target = facingCell();
+        const ladder = [
+          ...world.getPlaceablesAt(player.x, player.y, player.altitude),
+          ...world.getPlaceablesAt(target.x, target.y, player.altitude)
+        ].find((item) => item.type === "ladder" && item.direction === direction);
+        if (!ladder) return placeLadder(direction);
+        const result = ladder.use(player);
+        setLayer(player.altitude);
+        toast(result.ok
+          ? `LADDER TO ${result.altitude > 0 ? "+" : ""}${result.altitude}`
+          : `CANNOT CLIMB: ${result.reason.replaceAll("-", " ").toUpperCase()}`);
+        return result;
+      }
+
       function useNearbyLadder() {
         const target = facingCell();
         const ladders = [
@@ -452,11 +470,11 @@
         world.zoom = Math.max(6, Math.min(28, world.zoom * (event.deltaY > 0 ? 0.88 : 1.12)));
       }, { passive: false });
 
-      $("#downLayer").addEventListener("click", () => setLayer(world.altitude - 1));
-      $("#upLayer").addEventListener("click", () => setLayer(world.altitude + 1));
+      $("#downLayer").addEventListener("click", () => activateLadder("down"));
+      $("#upLayer").addEventListener("click", () => activateLadder("up"));
       $("#reseed").addEventListener("click", reseed);
-      $("#ladderUp").addEventListener("click", () => placeLadder("up"));
-      $("#ladderDown").addEventListener("click", () => placeLadder("down"));
+      $("#ladderUp").addEventListener("click", () => activateLadder("up"));
+      $("#ladderDown").addEventListener("click", () => activateLadder("down"));
       const fullscreenButton = $("#fullscreen");
       const fullscreenElement = () => document.fullscreenElement ?? document.webkitFullscreenElement;
       async function toggleFullscreen() {
@@ -475,10 +493,10 @@
       addEventListener("fullscreenchange", updateFullscreenButton);
       addEventListener("webkitfullscreenchange", updateFullscreenButton);
       addEventListener("keydown", (event) => {
-        if (event.code === "KeyQ") setLayer(world.altitude - 1);
-        if (event.code === "KeyE") setLayer(world.altitude + 1);
-        if (event.code === "KeyR") placeLadder("up");
-        if (event.code === "KeyF") placeLadder("down");
+        if (event.code === "KeyQ") activateLadder("down");
+        if (event.code === "KeyE") activateLadder("up");
+        if (event.code === "KeyR") activateLadder("up");
+        if (event.code === "KeyF") activateLadder("down");
         if (event.code === "Enter") useNearbyLadder();
         if (event.code === "Space") {
           event.preventDefault();
@@ -528,6 +546,7 @@
         player.renderer.update(dt);
         if (miningHeld) mineFromPlayer(now);
 
+        if (world.altitude !== Math.round(player.altitude)) setLayer(player.altitude);
         world.camera.x += (player.x - world.camera.x) * Math.min(1, dt * 9);
         world.camera.y += (player.y - world.camera.y) * Math.min(1, dt * 9);
         world.render();

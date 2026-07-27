@@ -196,8 +196,12 @@ export default class WorldCollision {
   }
 
   detectDrop(from, to, options = {}) {
-    const fromSurface = this.getSurfaceInfo(from.x, from.y, { entityAltitude: from.altitude });
-    const toSurface = this.getSurfaceInfo(to.x, to.y, { entityAltitude: from.altitude });
+    const surfaceOptions = {
+      entityAltitude: from.altitude,
+      fromAltitude: Math.floor(from.altitude),
+    };
+    const fromSurface = this.getSurfaceInfo(from.x, from.y, surfaceOptions);
+    const toSurface = this.getSurfaceInfo(to.x, to.y, surfaceOptions);
     const fromAltitude = Number(from.altitude ?? fromSurface.altitude ?? this.world.minAltitude);
     const landingAltitude = toSurface.altitude ?? this.world.minAltitude - 1;
     const dropHeight = Math.max(0, fromAltitude - landingAltitude);
@@ -239,7 +243,7 @@ export default class WorldCollision {
     for (let step = 1; step <= steps; step++) {
       const nextX = from.x + dx * (step / steps);
       const nextY = from.y + dy * (step / steps);
-      const footprint = this.#surfaceFootprint(nextX, nextY, radius);
+      const footprint = this.#surfaceFootprint(nextX, nextY, radius, altitude);
       if (footprint.outOfBounds) {
         blockedReason = "world-boundary";
         break;
@@ -297,7 +301,7 @@ export default class WorldCollision {
     return { x, y, altitude, blocked, reason: blockedReason, drop, report };
   }
 
-  #surfaceFootprint(x, y, radius) {
+  #surfaceFootprint(x, y, radius, fromAltitude) {
     let minimum = Infinity;
     let maximum = -Infinity;
     let outOfBounds = false;
@@ -306,7 +310,7 @@ export default class WorldCollision {
         outOfBounds = true;
         return true;
       }
-      const altitude = this.getSurfaceAltitude(sampleX, sampleY);
+      const altitude = this.getSurfaceAltitude(sampleX, sampleY, { fromAltitude });
       if (altitude != null) {
         minimum = Math.min(minimum, altitude);
         maximum = Math.max(maximum, altitude);
@@ -324,7 +328,10 @@ export default class WorldCollision {
     const dt = Math.max(0, Math.min(Number(deltaSeconds), Number(options.maxDelta ?? 0.1)));
     const gravity = Number(options.gravity ?? this.options.gravity);
     const terminalVelocity = Number(options.terminalVelocity ?? this.options.terminalVelocity);
-    const ground = this.getSurfaceInfo(entity.x, entity.y, { entityAltitude: entity.altitude });
+    const ground = this.getSurfaceInfo(entity.x, entity.y, {
+      entityAltitude: entity.altitude,
+      fromAltitude: Math.floor(entity.altitude),
+    });
     const landingAltitude = ground.altitude ?? this.world.minAltitude - 1;
     const startedAt = Number(entity.fallStartAltitude ?? entity.altitude);
     entity.fallStartAltitude ??= Number(entity.altitude);

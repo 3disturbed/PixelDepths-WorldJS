@@ -228,6 +228,10 @@ limits, and occupied endpoints prevent placement. `world.addPlaceable()`,
 `world.render()` draws them before players and `world.serialize()` includes
 their serialized state.
 
+Surface movement is bounded by the player's current altitude and cannot snap
+to a higher layer. Ladder traversal explicitly changes the player altitude;
+the game then renders only that player layer and its matching ladder endpoint.
+
 `tileSetId` is included in change packets, chunk snapshots, and saves. Multiplayer peers reject data from a different tile schema. Increase it whenever tile IDs or their gameplay meaning changes.
 
 ## 16×16 tilemap atlas
