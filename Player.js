@@ -1,5 +1,5 @@
-import PlayerPlugin from "./Player-Plugin.js?v=20260727-6";
-import PlayerRender from "./Player-Render.js?v=20260727-6";
+import PlayerPlugin from "./Player-Plugin.js?v=20260727-7";
+import PlayerRender from "./Player-Render.js?v=20260727-7";
 
 /**
  * Player.js
@@ -194,11 +194,31 @@ export default class Player {
       this.controls[control] = pressed;
       if (optionsPreventDefault(target, event)) event.preventDefault();
     };
-    this.controlHandlers = { keydown: update(true), keyup: update(false), blur: () => this.clearControls() };
+    let lastTouchEnd = -Infinity;
+    const consume = (event) => {
+      if (!event.cancelable) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+    };
+    const touchend = (event) => {
+      const now = Number(event.timeStamp ?? globalThis.performance?.now?.() ?? Date.now());
+      if (now - lastTouchEnd <= 350) consume(event);
+      lastTouchEnd = now;
+    };
+    this.controlHandlers = {
+      keydown: update(true),
+      keyup: update(false),
+      blur: () => this.clearControls(),
+      touchend,
+      dblclick: consume,
+    };
     this.controlTarget = target;
     target.addEventListener("keydown", this.controlHandlers.keydown);
     target.addEventListener("keyup", this.controlHandlers.keyup);
     target.addEventListener("blur", this.controlHandlers.blur);
+    target.addEventListener("touchend", this.controlHandlers.touchend, { passive: false });
+    target.addEventListener("dblclick", this.controlHandlers.dblclick);
     return () => this.detachControls();
 
     function optionsPreventDefault(controlTarget, event) {
@@ -211,6 +231,8 @@ export default class Player {
     this.controlTarget.removeEventListener("keydown", this.controlHandlers.keydown);
     this.controlTarget.removeEventListener("keyup", this.controlHandlers.keyup);
     this.controlTarget.removeEventListener("blur", this.controlHandlers.blur);
+    this.controlTarget.removeEventListener("touchend", this.controlHandlers.touchend);
+    this.controlTarget.removeEventListener("dblclick", this.controlHandlers.dblclick);
     this.controlTarget = null;
     this.controlHandlers = null;
     this.clearControls();

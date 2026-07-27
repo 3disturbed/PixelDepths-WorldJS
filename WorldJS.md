@@ -886,7 +886,10 @@ Movement vectors are normalized, values are clamped, and `delta` cannot exceed `
 
 ### Phone joypad and RPG buttons
 
-`OSJoypad.js` is a DOM-based, dependency-free phone controller. It feeds full analog values into `Player.sampleControls()` alongside keyboard and browser gamepad input:
+`OSJoypad.js` is a canvas-rendered, dependency-free phone controller. Its
+labels and controls are drawn pixels rather than selectable DOM elements. It
+feeds full analog values into `Player.sampleControls()` alongside keyboard and
+browser gamepad input:
 
 ```js
 import OSJoypad from "./OSJoypad.js";

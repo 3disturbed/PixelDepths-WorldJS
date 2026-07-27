@@ -42,6 +42,8 @@
     }
     .hud { position: fixed; inset: 0; pointer-events: none; }
     .topbar {
+      position: relative;
+      z-index: 2;
       display: flex;
       align-items: stretch;
       justify-content: space-between;
@@ -95,7 +97,7 @@
       font-size: 15px;
     }
     .ladder-button:hover, .ladder-button:active { border-color: var(--acid); color: var(--acid); }
-    .left-rail { position: absolute; top: 92px; left: max(12px, env(safe-area-inset-left)); display: grid; gap: 10px; }
+    .left-rail { position: absolute; z-index: 2; top: 92px; left: max(12px, env(safe-area-inset-left)); display: grid; gap: 10px; }
     .status-card { min-width: 154px; padding: 11px 12px; }
     .status-card label { display: flex; justify-content: space-between; color: var(--muted); font-size: 7px; letter-spacing: .1em; }
     .meter { height: 5px; margin-top: 7px; overflow: hidden; background: #ffffff12; }
@@ -179,16 +181,7 @@
       .readout:nth-child(3) { border-right: 0; }
       .readout:nth-child(n+4) { border-top: 1px solid var(--line); }
       .help { display: none; }
-      .os-joypad { position: absolute; inset: auto max(28px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left)); display: flex; align-items: flex-end; justify-content: space-between; pointer-events: none; }
-      .os-joypad__stick { position: relative; width: min(228px, 42vw); height: min(228px, 42vw); border: 1px solid #9aaba466; border-radius: 50%; background: #101a1bb8; box-shadow: inset 0 0 32px #0008; pointer-events: auto; touch-action: none; }
-      .os-joypad__knob { position: absolute; left: 30%; top: 30%; width: 40%; height: 40%; border: 1px solid #ddec6488; border-radius: 50%; background: #53615bcc; box-shadow: 0 8px 20px #0008; pointer-events: none; }
-      .os-joypad__buttons { position: relative; width: min(258px, 46vw); height: min(228px, 42vw); pointer-events: auto; }
-      .os-joypad__button { position: absolute; width: min(94px, 17vw); height: min(94px, 17vw); border: 1px solid #8d9b9488; border-radius: 50%; background: #152021df; color: var(--paper); font-size: clamp(14px, 4vw, 28px); touch-action: none; }
-      .os-joypad__button.primary { right: 0; top: 29%; width: min(111px, 20vw); height: min(111px, 20vw); color: var(--acid); border-color: #ddec6488; }
-      .os-joypad__button[data-action="interact"] { right: 36%; top: 0; }
-      .os-joypad__button[data-action="dodge"] { right: 38%; bottom: 0; }
-      .os-joypad__button[data-action="menu"] { left: 0; top: 29%; }
-      .os-joypad__button:active { transform: scale(.92); background: #263536; }
+      .os-joypad { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; display: block; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     }
     @media (max-width: 580px) {
       .brand small { display: none; }
@@ -211,11 +204,7 @@
       .readouts { grid-template-columns: repeat(3, minmax(64px, 1fr)); }
       .readout { min-width: 64px; padding: 6px 8px; }
       .readout:nth-child(n+4) { display: none; }
-      .os-joypad { inset: auto max(40px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left)); }
-      .os-joypad__stick { width: min(228px, 55vh); height: min(228px, 55vh); }
-      .os-joypad__buttons { width: min(258px, 62vh); height: min(228px, 55vh); }
-      .os-joypad__button { width: min(94px, 23vh); height: min(94px, 23vh); font-size: min(28px, 7vh); }
-      .os-joypad__button.primary { width: min(111px, 27vh); height: min(111px, 27vh); }
+      .os-joypad { inset: 0; }
     }
   </style>
 </head>
