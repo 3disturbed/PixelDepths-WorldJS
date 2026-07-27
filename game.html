@@ -280,7 +280,9 @@
         World.loadBiomes(`./Biomes.json?reload=${loadToken}`, { cache: "reload" }),
         World.loadGeneration(`./generation.json?reload=${loadToken}`, { cache: "reload" })
       ]);
-      const generation = structuredClone(loadedGeneration);
+      const generation = typeof globalThis.structuredClone === "function"
+        ? globalThis.structuredClone(loadedGeneration)
+        : JSON.parse(JSON.stringify(loadedGeneration));
       generation.rendering.tilemapUrl = `./Tiles.png?reload=${loadToken}`;
       // Keep spawn safe but small enough that the first viewport shows coast,
       // hills, and biome variation instead of one large flat plateau.
@@ -423,7 +425,7 @@
         const result = ladder.place(world);
         toast(result.ok
           ? `${direction.toUpperCase()} LADDER PLACED`
-          : `CANNOT PLACE: ${result.reason.replaceAll("-", " ").toUpperCase()}`);
+          : `CANNOT PLACE: ${formatReason(result.reason)}`);
         return result;
       }
 
@@ -438,7 +440,7 @@
         setLayer(player.altitude);
         toast(result.ok
           ? `LADDER TO ${result.altitude > 0 ? "+" : ""}${result.altitude}`
-          : `CANNOT CLIMB: ${result.reason.replaceAll("-", " ").toUpperCase()}`);
+          : `CANNOT CLIMB: ${formatReason(result.reason)}`);
         return result;
       }
 
@@ -451,7 +453,11 @@
         const result = ladders[0]?.use(player) ?? { ok: false, reason: "no-ladder" };
         toast(result.ok
           ? `LADDER TO ${result.altitude > 0 ? "+" : ""}${result.altitude}`
-          : `CANNOT CLIMB: ${result.reason.replaceAll("-", " ").toUpperCase()}`);
+          : `CANNOT CLIMB: ${formatReason(result.reason)}`);
+      }
+
+      function formatReason(reason) {
+        return String(reason).replace(/-/g, " ").toUpperCase();
       }
 
       canvas.addEventListener("wheel", (event) => {

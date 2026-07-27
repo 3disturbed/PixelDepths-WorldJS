@@ -334,7 +334,9 @@ export default class WorldCollision {
     });
     const landingAltitude = ground.altitude ?? this.world.minAltitude - 1;
     const startedAt = Number(entity.fallStartAltitude ?? entity.altitude);
-    entity.fallStartAltitude ??= Number(entity.altitude);
+    if (entity.fallStartAltitude == null) {
+      entity.fallStartAltitude = Number(entity.altitude);
+    }
     entity.verticalVelocity = Math.max(
       -terminalVelocity,
       Number(entity.verticalVelocity ?? 0) - gravity * dt,

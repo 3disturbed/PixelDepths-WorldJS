@@ -1,5 +1,5 @@
-import WorldCollision from "./World-Collision.js?v=20260727-7";
-import Player from "./Player.js?v=20260727-7";
+import WorldCollision from "./World-Collision.js?v=20260727-8";
+import Player from "./Player.js?v=20260727-8";
 
 /**
  * World.js
