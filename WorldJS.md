@@ -220,7 +220,10 @@ const placement = ladder.place(world);
 if (placement.ok) ladder.use(player);
 ```
 
-Ladders require walkable, non-water floors at both ends. `world.addPlaceable()`,
+Ladders are placed as linked pairs. A down ladder automatically places its up
+counterpart on the lower floor. An up ladder creates a dirt landing when the
+layer above is air, then places its down counterpart there. Water, altitude
+limits, and occupied endpoints prevent placement. `world.addPlaceable()`,
 `world.removePlaceable()`, and `world.getPlaceablesAt()` manage placed objects;
 `world.render()` draws them before players and `world.serialize()` includes
 their serialized state.

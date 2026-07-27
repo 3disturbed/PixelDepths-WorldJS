@@ -9,6 +9,7 @@ export default class Ladder extends Placeable {
   constructor(options = {}) {
     super({ ...options, type: Ladder.type });
     this.direction = options.direction === "down" ? "down" : "up";
+    this.pairId = options.pairId == null ? null : String(options.pairId);
   }
 
   get targetAltitude() {
@@ -21,14 +22,65 @@ export default class Ladder extends Placeable {
     if (this.targetAltitude < world.minAltitude || this.targetAltitude > world.maxAltitude) {
       return { ok: false, reason: "altitude-limit" };
     }
-    if (!world.collision.isWalkableAt(this.x, this.y, this.targetAltitude)) {
+    const targetTile = world.collision.tileAt(this.x, this.y, this.targetAltitude);
+    if (targetTile?.liquid) return { ok: false, reason: "water" };
+    const canBuildLanding = this.direction === "up" &&
+      world.materialAt(this.x, this.y, this.targetAltitude) === world.constructor.AIR;
+    if (!world.collision.isWalkableAt(this.x, this.y, this.targetAltitude) && !canBuildLanding) {
       return { ok: false, reason: "no-destination-floor" };
     }
-    const occupied = world.getPlaceablesAt(this.x, this.y, this.altitude)
+    const sourceOccupied = world.getPlaceablesAt(this.x, this.y, this.altitude)
       .some((item) => item.type === this.type && item.direction === this.direction);
-    return occupied
+    const pairedDirection = this.direction === "up" ? "down" : "up";
+    const targetOccupied = world.getPlaceablesAt(this.x, this.y, this.targetAltitude)
+      .some((item) => item.type === this.type && item.direction === pairedDirection);
+    return sourceOccupied || targetOccupied
       ? { ok: false, reason: "occupied" }
       : { ok: true, reason: null };
+  }
+
+  place(world) {
+    const validation = this.canPlace(world);
+    if (!validation.ok) return validation;
+
+    let createdLanding = false;
+    if (!world.collision.isWalkableAt(this.x, this.y, this.targetAltitude)) {
+      world.setMaterial(
+        this.x,
+        this.y,
+        this.targetAltitude,
+        world.constructor.DIRT_FLOOR,
+        { operationId: `ladder-floor:${this.id}`, render: false },
+      );
+      createdLanding = true;
+    }
+
+    const counterpart = new Ladder({
+      id: `${this.id}:pair`,
+      pairId: this.id,
+      x: this.x,
+      y: this.y,
+      altitude: this.targetAltitude,
+      direction: this.direction === "up" ? "down" : "up",
+    });
+    this.pairId = counterpart.id;
+    world.addPlaceable(this);
+    world.addPlaceable(counterpart);
+    return {
+      ok: true,
+      placeable: this,
+      counterpart,
+      createdLanding,
+    };
+  }
+
+  remove() {
+    const world = this.world;
+    if (!world) return false;
+    const pairId = this.pairId;
+    const removed = world.removePlaceable(this.id);
+    if (pairId) world.removePlaceable(pairId);
+    return removed;
   }
 
   use(player) {
@@ -71,6 +123,6 @@ export default class Ladder extends Placeable {
   }
 
   serialize() {
-    return { ...super.serialize(), direction: this.direction };
+    return { ...super.serialize(), direction: this.direction, pairId: this.pairId };
   }
 }
